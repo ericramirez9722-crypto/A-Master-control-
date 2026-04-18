@@ -1,0 +1,7 @@
+{
+  "name": "IA Studio A+B Master Control",
+  "description": "A high-end synthetic visual intelligence platform for hyperrealistic image generation, luxury editorial editing, and professional visual analysis using Gemini 2.5 and 3.0 series models.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
