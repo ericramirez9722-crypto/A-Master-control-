@@ -74,6 +74,7 @@ import {
   Moon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { Toaster, toast } from 'sonner';
 import { Mode, Preset, SyntergicDNA } from "./types";
 import { IMAGE_PRESETS } from "./constants";
 import { gemini } from "./services/geminiService";
@@ -175,6 +176,46 @@ export default function App(): React.ReactElement {
       document.documentElement.classList.remove('light');
     }
   }, [theme]);
+
+  // Non-intrusive error notifications via Toasts
+  useEffect(() => {
+    if (error) {
+      const { message, type } = error;
+      switch (type) {
+        case 'quota':
+          toast.warning("Límite Neural Alcanzado", {
+            description: message || "Has excedido el límite de peticiones gratuitas.",
+            duration: 6000,
+            action: {
+              label: "Ver Planes",
+              onClick: () => window.open('https://ai.google.dev/pricing', '_blank')
+            }
+          });
+          break;
+        case 'permission':
+          toast.error("Error de Configuración", {
+            description: message || "Se requiere una cuenta con facturación activa para este modelo.",
+            duration: 8000,
+            action: {
+              label: "Configuración",
+              onClick: () => window.open('https://console.cloud.google.com/billing', '_blank')
+            }
+          });
+          break;
+        case 'critical':
+          toast.error("Fallo en el Motor Neural", {
+            description: message || "Ocurrió un error inesperado. Intenta refrescar la sesión.",
+            duration: 5000,
+          });
+          break;
+        default:
+          toast(message || "Notificación del sistema");
+      }
+      // Automaticaly clear internal error state to allow re-triggering of the same message if needed
+      const timer = setTimeout(() => setError(null), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
@@ -1968,28 +2009,28 @@ export default function App(): React.ReactElement {
   const handleExecution = async () => {
     // Input Validation
     if ((mode === "generate" || mode === "evolution" || mode === "mockup" || mode === "asset" || mode === "concept" || mode === "dataset" || mode === "worldbuilding" || mode === "texture") && !prompt.trim()) {
-      return setError({message: "Por favor ingresa instrucciones detalladas.", type: 'critical'});
+      return setError({message: "Sintaxis requerida: Ingresa una descripción detallada para activar la síntesis neural.", type: 'critical'});
     }
     if (prompt.length > MAX_PROMPT_LENGTH) {
-      return setError({message: `El prompt excede el límite neural de ${MAX_PROMPT_LENGTH} caracteres.`, type: 'critical'});
+      return setError({message: `Límite excedido: El prompt neural no puede superar los ${MAX_PROMPT_LENGTH} caracteres.`, type: 'critical'});
     }
     if ((mode === "edit" || mode === "inpaint" || mode === "style-transfer") && (!sourceImage || !prompt.trim())) {
-      return setError({message: "Imagen y prompt requeridos para esta operación.", type: 'critical'});
+      return setError({message: "Contexto insuficiente: Se requiere una imagen base y un prompt descriptivo para esta operación.", type: 'critical'});
     }
     if (mode === "upscale" && (!sourceImage && !resultImage)) {
-      return setError({message: "Se requiere una imagen base para realizar el Upscale.", type: 'critical'});
+      return setError({message: "Falta activo: Carga una imagen para aplicar el algoritmo de escalado de super-resolución.", type: 'critical'});
     }
     if (mode === "style-transfer" && !styleImage) {
-      return setError({message: "Imagen de estilo requerida para transferencia.", type: 'critical'});
+      return setError({message: "Referencia faltante: Selecciona una imagen artística de referencia para extraer su DNA de estilo.", type: 'critical'});
     }
     if (mode === "vision" && !sourceImage) {
-      return setError({message: "Imagen requerida para el análisis óptico.", type: 'critical'});
+      return setError({message: "Entrada requerida: Carga una imagen para iniciar el análisis de visión computacional profunda.", type: 'critical'});
     }
     if (watermarkText.length > MAX_WATERMARK_LENGTH) {
-      return setError({message: `La marca de agua excede el límite de ${MAX_WATERMARK_LENGTH} caracteres.`, type: 'critical'});
+      return setError({message: `Límite de identidad: La marca de agua excede el límite de ${MAX_WATERMARK_LENGTH} caracteres.`, type: 'critical'});
     }
     if (isNaN(seed) || seed < 0) {
-      return setError({message: "El Seed debe ser un valor numérico positivo.", type: 'critical'});
+      return setError({message: "Parámetro inválido: El Seed estocástico debe ser un valor numérico positivo.", type: 'critical'});
     }
 
     setLoading(true);
@@ -2265,9 +2306,13 @@ export default function App(): React.ReactElement {
         handleOpenKey();
         return;
       }
-      if (errorStr.includes("429")) setError({ message: "Límite excedido. Usa modo estándar.", type: 'quota' });
-      else if (errorStr.includes("pro_permission")) setError({ message: "Gemini 3 Pro requiere Billing activo.", type: 'permission' });
-      else setError({ message: err?.message || "Error motor neural.", type: 'critical' });
+      if (errorStr.includes("429") || errorStr.includes("quota")) {
+        setError({ message: "Saturación Neural: Has alcanzado el límite de peticiones del motor gratuito. El ciclo se reiniciará en unas horas o puedes cambiar a un modelo de menor densidad.", type: 'quota' });
+      } else if (errorStr.includes("pro_permission") || errorStr.includes("billing")) {
+        setError({ message: "Acceso Pro Denegado: Las funciones de alta fidelidad requieren una configuración de facturación activa en tu consola de Google Cloud.", type: 'permission' });
+      } else {
+        setError({ message: err?.message || "Inestabilidad Sistémica: El motor neural no ha podido completar la síntesis. Revisa la complejidad del prompt o la calidad de la imagen base.", type: 'critical' });
+      }
     } finally {
       setTimeout(() => { setLoading(false); setLoadingStage(""); setProgress(0); }, 1200);
     }
@@ -2320,11 +2365,18 @@ export default function App(): React.ReactElement {
         setFilters({ brightness: Math.round(b), contrast: Math.round(c), saturation: Math.round(s) });
         addLog(`AUTO-BALANCE COMPLETE: B:${Math.round(b)}% C:${Math.round(c)}% S:${Math.round(s)}%`);
       }
-    } catch (err) {
-      addLog("NEURAL ANALYSIS: FAILED");
+    } catch (err: any) {
+      console.error("NEURAL_ENGINE_FAILURE:", err);
+      const errorMessage = err?.message || "Ocurrió un error inesperado en el motor neural.";
+      setError({
+        message: errorMessage,
+        type: 'critical'
+      });
+      addLog(`PROTOCOL FAILURE: ${errorMessage.toUpperCase()}`);
     } finally {
       setLoading(false);
       setLoadingStage("");
+      if (progressIntervalRef.current) window.clearInterval(progressIntervalRef.current);
     }
   };
 
@@ -2510,6 +2562,7 @@ export default function App(): React.ReactElement {
       onMouseMove={handleMouseMove}
       className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col items-center py-6 sm:py-10 px-4 sm:px-6 md:px-8 font-['Inter'] relative overflow-x-hidden transition-colors duration-300"
     >
+      <Toaster position="bottom-right" richColors theme={theme} closeButton expand={false} />
       {/* Remote Cursors */}
       {Object.entries(cursors).map(([id, cursor]: [string, any]) => (
         <div 

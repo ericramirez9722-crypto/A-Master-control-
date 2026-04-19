@@ -50,3 +50,60 @@ body {
 :root.light .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
 }
+
+/* Sonner Toast Customization for Luxe Aesthetic */
+[data-sonner-toast] {
+  background: rgba(10, 10, 10, 0.85) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 24px !important;
+  color: #fff !important;
+  padding: 18px 24px !important;
+  font-family: inherit !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75) !important;
+  overflow: hidden !important;
+}
+
+[data-sonner-toast] [data-title] {
+  font-weight: 900 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+  font-size: 11px !important;
+  margin-bottom: 4px !important;
+}
+
+[data-sonner-toast] [data-description] {
+  color: #a1a1aa !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  font-weight: 500 !important;
+}
+
+[data-sonner-toast] [data-button] {
+  background: #fbbf24 !important;
+  color: #000 !important;
+  border-radius: 12px !important;
+  font-weight: 900 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  font-size: 10px !important;
+  padding: 8px 14px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+[data-sonner-toast] [data-button]:hover {
+  transform: scale(1.05) !important;
+  background: #fcd34d !important;
+}
+
+:root.light [data-sonner-toast] {
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: #000 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1) !important;
+}
+
+:root.light [data-sonner-toast] [data-description] {
+  color: #52525b !important;
+}

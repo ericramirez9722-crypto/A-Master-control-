@@ -4,20 +4,38 @@ import { createServer as createViteServer } from "vite";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
+import { RoomState, User, Comment } from "./types";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+import { randomUUID } from "crypto";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // State management
+  // Optimized Memory & State management
   const rooms: Record<string, {
-    state: any;
-    users: Record<string, { id: string; name: string; color: string; mode?: string }>;
-    comments: any[];
+    state: RoomState;
+    users: Record<string, User>;
+    comments: Comment[];
+    lastActivity: number;
   }> = {};
+
+  // Room Cleanup Interval (every 5 minutes)
+  setInterval(() => {
+    const now = Date.now();
+    Object.keys(rooms).forEach(roomId => {
+      // Delete empty rooms or rooms inactive for > 1 hour
+      const isInactive = now - rooms[roomId].lastActivity > 3600000;
+      const isEmpty = Object.keys(rooms[roomId].users).length === 0;
+      if (isEmpty || isInactive) {
+        console.log(`[CLEANUP] Evicting room: ${roomId}`);
+        delete rooms[roomId];
+      }
+    });
+  }, 300000);
 
   // Vite middleware for development
   let vite: any;
@@ -45,7 +63,7 @@ async function startServer() {
   wss.on("connection", (ws: WebSocket & { roomId?: string; userId?: string }, req) => {
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const roomId = url.searchParams.get("roomId") || "default";
-    const userId = url.searchParams.get("userId") || Math.random().toString(36).substr(2, 9);
+    const userId = url.searchParams.get("userId") || randomUUID();
     const userName = url.searchParams.get("userName") || `User-${userId.substr(0, 4)}`;
     
     ws.roomId = roomId;
@@ -71,6 +89,7 @@ async function startServer() {
         },
         users: {},
         comments: [],
+        lastActivity: Date.now(),
       };
     }
 
@@ -97,9 +116,17 @@ async function startServer() {
     }, userId);
 
     ws.on("message", (data) => {
+      // Security: Limit payload size (5MB for images/state)
+      if (data.toString().length > 5 * 1024 * 1024) {
+        console.warn(`[SECURITY] Large payload rejected from ${userId}`);
+        return;
+      }
+
       try {
         const message = JSON.parse(data.toString());
         const { type, payload } = message;
+        
+        if (rooms[roomId]) rooms[roomId].lastActivity = Date.now();
 
         switch (type) {
           case "state:update":
@@ -123,7 +150,7 @@ async function startServer() {
 
           case "comment:add":
             const newComment = {
-              id: Math.random().toString(36).substr(2, 9),
+              id: randomUUID(),
               userId,
               userName,
               userColor,

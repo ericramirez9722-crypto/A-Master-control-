@@ -3,11 +3,19 @@ import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_CORE_INSTRUCTIONS } from "../constants";
 
 export class GeminiService {
+  private async callWithTimeout<T>(fn: () => Promise<T>, timeoutMs = 15000): Promise<T> {
+    const timeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`Neural Engine Timeout: Operation exceeded ${timeoutMs}ms`)), timeoutMs)
+    );
+    return Promise.race([fn(), timeout]) as Promise<T>;
+  }
+
   private async callWithRetry<T>(fn: () => Promise<T>, isPro: boolean = false, maxRetries = 2, baseDelay = 2000): Promise<T> {
     let lastError: any;
     for (let i = 0; i < maxRetries; i++) {
       try {
-        return await fn();
+        console.log(`[GEMINI_SERVICE] Executing Neural Call (Attempt ${i + 1}/${maxRetries})...`);
+        return await this.callWithTimeout(() => fn());
       } catch (error: any) {
         lastError = error;
         const errorStr = (error?.message || JSON.stringify(error)).toLowerCase();
