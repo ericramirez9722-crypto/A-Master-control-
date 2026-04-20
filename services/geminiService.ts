@@ -1,56 +1,47 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_CORE_INSTRUCTIONS } from "../constants";
+import { retryManager } from "../lib/retryManager";
 
 export class GeminiService {
-  private async callWithTimeout<T>(fn: () => Promise<T>, timeoutMs = 15000): Promise<T> {
-    const timeout = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error(`Neural Engine Timeout: Operation exceeded ${timeoutMs}ms`)), timeoutMs)
-    );
-    return Promise.race([fn(), timeout]) as Promise<T>;
+  private onRetryCallback?: (attempt: number, error: any) => void;
+
+  setOnRetry(callback: (attempt: number, error: any) => void) {
+    this.onRetryCallback = callback;
   }
 
-  private async callWithRetry<T>(fn: () => Promise<T>, isPro: boolean = false, maxRetries = 2, baseDelay = 2000): Promise<T> {
-    let lastError: any;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        console.log(`[GEMINI_SERVICE] Executing Neural Call (Attempt ${i + 1}/${maxRetries})...`);
-        return await this.callWithTimeout(() => fn());
-      } catch (error: any) {
-        lastError = error;
+  private async executeNeuralOperation<T>(
+    operationId: string, 
+    fn: (signal: AbortSignal) => Promise<T>, 
+    isPro: boolean = false
+  ): Promise<T> {
+    return retryManager({
+      operationId,
+      fn,
+      maxRetries: 3,
+      baseDelay: 2000,
+      timeoutMs: isPro ? 45000 : 30000,
+      onRetry: this.onRetryCallback,
+      onFail: (error) => {
         const errorStr = (error?.message || JSON.stringify(error)).toLowerCase();
-        
-        // Error de Cuota (429)
-        if (errorStr.includes("429") || errorStr.includes("resource_exhausted") || errorStr.includes("quota")) {
-          const delay = baseDelay * Math.pow(2, i);
-          console.warn(`Quota reached. Retrying in ${delay}ms... (${i + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-
-        // Error de Permisos (403) - No reintentar, es un problema de configuración/pago
         if (errorStr.includes("403") || errorStr.includes("permission_denied")) {
           if (isPro) {
             throw new Error("PRO_PERMISSION_DENIED: El modelo Gemini 3 Pro requiere una API Key de un proyecto con facturación activa.");
           }
           throw new Error("PERMISSION_DENIED: No tienes permisos para acceder a este modelo.");
         }
-
-        // Error de Entidad no encontrada (a veces relacionado con keys mal configuradas)
-        if (errorStr.includes("requested entity was not found")) {
+        if (errorStr.includes("requested entity was not found") || errorStr.includes("key_not_found")) {
           throw new Error("KEY_NOT_FOUND: La API Key seleccionada no es válida para este modelo.");
         }
-        
-        throw error;
       }
-    }
-    throw lastError;
+    });
   }
 
   async generateImage(prompt: string, presetPrompt?: string, highQuality: boolean = false, useSearch: boolean = false, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
     const modelName = highQuality ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`generate-${prompt.substring(0, 10)}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      // ... rest of the implementation
       const finalPrompt = presetPrompt ? `${prompt}. Style constraints: ${presetPrompt}` : prompt;
       const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
       const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nUSER INTENT (GENERATE): ${finalPrompt}${negativeInstruction}`;
@@ -88,7 +79,7 @@ export class GeminiService {
 
   async editImage(base64Image: string, prompt: string, presetPrompt?: string, highQuality: boolean = true, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
     const modelName = highQuality ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`edit-${prompt.substring(0, 10)}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const finalPrompt = presetPrompt ? `${prompt}. Visual Signature: ${presetPrompt}` : prompt;
@@ -118,11 +109,11 @@ export class GeminiService {
         }
       }
       throw new Error("Neural Engine failed to return edited data.");
-    });
+    }, highQuality);
   }
 
   async inpaintImage(base64Image: string, maskBase64: string, prompt: string, presetPrompt?: string, negativePrompt?: string): Promise<string> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`inpaint-${prompt.substring(0, 10)}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanImg = base64Image.split(',')[1] || base64Image;
       const cleanMask = maskBase64.split(',')[1] || maskBase64;
@@ -157,7 +148,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
   }
 
   async analyzeForRefinement(base64Image: string, originalPrompt: string): Promise<string> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation('refinement-analysis', async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
@@ -175,7 +166,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
   }
 
   async analyzeImage(base64Image: string): Promise<any> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation('visual-analysis', async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
@@ -224,7 +215,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
   }
 
   async searchSpecificObjects(base64Image: string, query: string): Promise<any[]> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation('object-search', async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
@@ -255,7 +246,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
   }
 
   async suggestColorGrading(base64Image: string): Promise<any> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation('color-grading-suggestions', async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
@@ -280,7 +271,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
   }
 
   async styleTransfer(contentImage: string, styleImage: string, prompt: string, intensity: number = 80, negativePrompt?: string): Promise<string> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`style-transfer-${prompt.substring(0, 10)}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanContent = contentImage.split(',')[1] || contentImage;
       const cleanStyle = styleImage.split(',')[1] || styleImage;
@@ -321,7 +312,7 @@ USER INTENT: ${prompt}${negativeInstruction}`;
     };
     const targetSize = sizeMap[factor] || "2K";
 
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`upscale-${factor}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       
@@ -359,7 +350,7 @@ Remove any compression artifacts or noise.`;
   }
 
   async parseIntent(prompt: string): Promise<string> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation(`parse-intent-${prompt.substring(0, 10)}`, async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -427,7 +418,7 @@ ${structuredPrompt}${negativeInstruction}
 
     for (let i = 0; i < actualVariationCount; i++) {
       const variationSeed = i > 0 ? `\nVariation ${i+1}: Focus on a different angle or lighting nuance while maintaining coherence.` : "";
-      const res = await this.callWithRetry(async () => {
+      const res = await this.executeNeuralOperation(`syntergic-${mode}-${i}`, async (signal) => {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const response = await ai.models.generateContent({
           model: modelName,
@@ -473,7 +464,7 @@ ${structuredPrompt}${negativeInstruction}
   }
 
   async suggestEnhancements(prompt: string, mode: string): Promise<{ enhanced: string; keywords: string[] }> {
-    return this.callWithRetry(async () => {
+    return this.executeNeuralOperation('prompt-enhancement', async (signal) => {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',

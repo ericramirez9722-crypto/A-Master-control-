@@ -72,6 +72,8 @@ import {
   MousePointer2,
   Columns,
   Moon,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
@@ -154,7 +156,41 @@ export default function App(): React.ReactElement {
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
   };
-  const [error, setError] = useState<{message: string, type: 'quota' | 'permission' | 'critical' | null} | null>(null);
+  const [error, setError] = useState<{message: string, type: 'quota' | 'permission' | 'critical' | 'network' | null} | null>(null);
+  const lastActionRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Network Awareness & Global Replay System
+  useEffect(() => {
+    const handleOnline = () => toast.success("Conexión Restaurada", { description: "El Motor Neural vuelve a estar en línea." });
+    const handleOffline = () => toast.error("Sin Conexión", { description: "Has perdido el vínculo con el Motor Neural. Revisa tu red." });
+    
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    gemini.setOnRetry(handleNeuralRetry);
+  }, []);
+
+  const retryLastAction = async () => {
+    if (lastActionRef.current) {
+      addLog("RETRY_MANAGER: TRIGGERING REPLAY OF LAST ACTION");
+      await lastActionRef.current();
+    }
+  };
+
+  const handleNeuralRetry = (attempt: number, error: any) => {
+    const errorMsg = error?.message || "Inestabilidad temporal";
+    addLog(`NEURAL_RETRY [${attempt}]: ${errorMsg.toUpperCase()}`);
+    toast.warning(`Reintentando... (${attempt}/3)`, {
+      description: "Recuperación adaptativa en curso por inestabilidad de red.",
+      icon: <RefreshCcw size={14} className="animate-spin" />
+    });
+  };
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [analysisData, setAnalysisData] = useState<any>(null);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
@@ -199,6 +235,17 @@ export default function App(): React.ReactElement {
             action: {
               label: "Configuración",
               onClick: () => window.open('https://console.cloud.google.com/billing', '_blank')
+            }
+          });
+          break;
+        case 'network':
+          toast.error("Inestabilidad de Red", {
+            description: message || "Error de conexión temporal con el Motor Neural.",
+            duration: 7000,
+            icon: <WifiOff size={16} className="text-red-400" />,
+            action: {
+              label: "Reintentar",
+              onClick: () => retryLastAction()
             }
           });
           break;
@@ -488,7 +535,7 @@ export default function App(): React.ReactElement {
   const [filters, setFilters] = useState({ brightness: 100, contrast: 100, saturation: 100 });
   const [worldbuildResults, setWorldbuildResults] = useState<{ category: string; image: string }[] | null>(null);
   const [multiResults, setMultiResults] = useState<string[] | null>(null);
-  const [variationCount, setVariationCount] = useState<1 | 2 | 4 | 8>(1);
+  const [variationCount, setVariationCount] = useState<1 | 2 | 4 | 8>(4);
   const [assetType, setAssetType] = useState<"icon" | "component" | "illustration">("icon");
   const [assetBackground, setAssetBackground] = useState<"isolated" | "gradient" | "scene">("isolated");
   const [exportSettings, setExportSettings] = useState({ format: 'png', quality: 90 });
@@ -1187,7 +1234,7 @@ export default function App(): React.ReactElement {
                 {filteredHistory.map((item) => {
                   const isActive = item.image === resultImage;
                   return (
-                    <div key={item.id} className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-row group hover:border-white/20 transition-all h-40 relative ${isActive ? 'border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20' : 'border-white/5'}`}>
+                    <div key={item.id} className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col sm:flex-row group hover:border-white/20 transition-all h-auto sm:h-40 relative ${isActive ? 'border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20' : 'border-white/5'}`}>
                       {isActive && (
                         <div className="absolute top-0 right-0 z-10">
                           <div className="bg-amber-500 text-black text-[7px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest shadow-lg">
@@ -1195,10 +1242,17 @@ export default function App(): React.ReactElement {
                           </div>
                         </div>
                       )}
-                      <div className="w-40 shrink-0 relative overflow-hidden bg-black/40 border-r border-white/5">
+                      <div className="w-full sm:w-40 aspect-video sm:aspect-square shrink-0 relative overflow-hidden bg-black/40 border-b sm:border-b-0 sm:border-r border-white/5">
                       <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                      <div className="absolute top-3 left-3 px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
-                        <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">{item.mode}</span>
+                      <div className="absolute top-3 left-3 flex gap-1">
+                        <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
+                          <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">{item.mode.includes('upscale') ? 'Upscale' : item.mode}</span>
+                        </div>
+                        {item.mode === 'upscale-8x' && (
+                          <div className="px-2 py-0.5 bg-amber-500 rounded-lg shadow-lg animate-pulse">
+                            <span className="text-[7px] font-black uppercase tracking-widest text-black">4K ULTRA</span>
+                          </div>
+                        )}
                       </div>
                       <button 
                         onClick={() => {
@@ -1966,6 +2020,21 @@ export default function App(): React.ReactElement {
     }, 100);
   };
 
+  const handleMultiVariation = async () => {
+    const target = gradedImage || resultImage || sourceImage;
+    if (!target || loading) return;
+    
+    setSourceImage(target);
+    setMode('edit');
+    setVariationCount(4);
+    addLog("PROTOCOL: INITIATING MULTI-VARIATION SYNTHESIS (4X)");
+    
+    setTimeout(() => {
+      const btn = document.getElementById('action-button');
+      if (btn) btn.click();
+    }, 100);
+  };
+
   const processImage = async (imageSrc: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -2007,6 +2076,9 @@ export default function App(): React.ReactElement {
   };
 
   const handleExecution = async () => {
+    // 💾 Save last action for potential retry
+    lastActionRef.current = handleExecution;
+
     // Input Validation
     if ((mode === "generate" || mode === "evolution" || mode === "mockup" || mode === "asset" || mode === "concept" || mode === "dataset" || mode === "worldbuilding" || mode === "texture") && !prompt.trim()) {
       return setError({message: "Sintaxis requerida: Ingresa una descripción detallada para activar la síntesis neural.", type: 'critical'});
@@ -2167,10 +2239,22 @@ export default function App(): React.ReactElement {
           "Harmonizing Contrast",
           "Finalizing Asset"
         ]);
-        const res = await gemini.editImage(processedSource!, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, aspectRatio, negativePrompt);
-        setResultImage(res);
-        addToHistory({ mode, prompt, params: currentParams, image: res });
-        saveToHistory(`Edit: ${prompt.substring(0, 20)}...`);
+        
+        if (variationCount > 1) {
+          const promises = Array.from({ length: variationCount }).map(() => 
+            gemini.editImage(processedSource!, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, aspectRatio, negativePrompt)
+          );
+          const results = await Promise.all(promises);
+          setMultiResults(results);
+          setResultImage(results[0]);
+          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          saveToHistory(`Edit Variations: ${prompt.substring(0, 20)}...`);
+        } else {
+          const res = await gemini.editImage(processedSource!, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, aspectRatio, negativePrompt);
+          setResultImage(res);
+          addToHistory({ mode, prompt, params: currentParams, image: res });
+          saveToHistory(`Edit: ${prompt.substring(0, 20)}...`);
+        }
         setGradedImage(null);
       } else if (mode === "inpaint") {
         startProgressSimulation([
@@ -2181,10 +2265,22 @@ export default function App(): React.ReactElement {
           "Asset Reconstruction"
         ]);
         const mask = getBinaryMaskBase64();
-        const res = await gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt);
-        setResultImage(res);
-        addToHistory({ mode, prompt, params: currentParams, image: res });
-        saveToHistory(`Inpaint: ${prompt.substring(0, 20)}...`);
+
+        if (variationCount > 1) {
+          const promises = Array.from({ length: variationCount }).map(() => 
+            gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt)
+          );
+          const results = await Promise.all(promises);
+          setMultiResults(results);
+          setResultImage(results[0]);
+          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          saveToHistory(`Inpaint Variations: ${prompt.substring(0, 20)}...`);
+        } else {
+          const res = await gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt);
+          setResultImage(res);
+          addToHistory({ mode, prompt, params: currentParams, image: res });
+          saveToHistory(`Inpaint: ${prompt.substring(0, 20)}...`);
+        }
         setGradedImage(null);
       } else if (mode === "vision") {
         startProgressSimulation([
@@ -2274,10 +2370,22 @@ export default function App(): React.ReactElement {
           "Harmonizing Aesthetics",
           "Finalizing Transfer"
         ]);
-        const res = await gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt);
-        setResultImage(res);
-        addToHistory({ mode, prompt, params: currentParams, image: res });
-        saveToHistory(`Style: ${prompt.substring(0, 20)}...`);
+        
+        if (variationCount > 1) {
+          const promises = Array.from({ length: variationCount }).map(() => 
+            gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt)
+          );
+          const results = await Promise.all(promises);
+          setMultiResults(results);
+          setResultImage(results[0]);
+          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          saveToHistory(`Style Variations: ${prompt.substring(0, 20)}...`);
+        } else {
+          const res = await gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt);
+          setResultImage(res);
+          addToHistory({ mode, prompt, params: currentParams, image: res });
+          saveToHistory(`Style: ${prompt.substring(0, 20)}...`);
+        }
         setGradedImage(null);
         stopProgressSimulation("Transferencia de Estilo Completada");
       } else if (mode === "upscale") {
@@ -2308,6 +2416,8 @@ export default function App(): React.ReactElement {
       }
       if (errorStr.includes("429") || errorStr.includes("quota")) {
         setError({ message: "Saturación Neural: Has alcanzado el límite de peticiones del motor gratuito. El ciclo se reiniciará en unas horas o puedes cambiar a un modelo de menor densidad.", type: 'quota' });
+      } else if (errorStr.includes("rpc failed") || errorStr.includes("xhr error")) {
+        setError({ message: "Inestabilidad de Red: El Motor Neural ha experimentado un fallo de conexión temporal (XHR/RPC). Por favor, reintenta la operación en unos segundos.", type: 'network' });
       } else if (errorStr.includes("pro_permission") || errorStr.includes("billing")) {
         setError({ message: "Acceso Pro Denegado: Las funciones de alta fidelidad requieren una configuración de facturación activa en tu consola de Google Cloud.", type: 'permission' });
       } else {
@@ -2726,12 +2836,12 @@ export default function App(): React.ReactElement {
       </AnimatePresence>
 
       <div className="max-w-7xl w-full space-y-8">
-        <header className="flex flex-col items-center space-y-4 mb-8">
-          <div className="flex items-center gap-4">
+        <header className="flex flex-col items-center space-y-4 mb-4 sm:mb-8 w-full px-2">
+          <div className="flex flex-wrap justify-center items-center gap-2 sm:gap-4 overflow-x-auto sm:overflow-visible w-full sm:w-auto px-2 py-2 no-scrollbar">
             <Tooltip text="Motor de Síntesis Visual IA Studio v2.5/3.0">
               <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full cursor-help hover:bg-white/10 transition-colors">
                 <Crown size={14} className="text-amber-400" />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">IA Studio Core</span>
+                <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Core</span>
               </div>
             </Tooltip>
             <Tooltip text="Iniciar Tutorial de Usuario">
@@ -2794,145 +2904,155 @@ export default function App(): React.ReactElement {
                   className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full ml-2 hover:bg-emerald-500/20 transition-colors"
                 >
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">{remoteUsers.length} ACTIVOS</span>
+                  <span className="text-[7px] sm:text-[8px] font-black text-emerald-500 uppercase tracking-widest">{remoteUsers.length}</span>
                 </button>
               )}
             </div>
+          </div>
+          
+          <div className="flex flex-col items-center gap-4 w-full">
+            <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-700 select-none text-center">MASTER CONTROL</h1>
+            
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <div id="undo-redo-controls" className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full shadow-2xl backdrop-blur-md">
+                <Tooltip text="Deshacer (Ctrl+Z)">
+                  <button 
+                    onClick={undo} 
+                    disabled={undoStack.length === 0}
+                    className={`p-1.5 transition-all ${undoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
+                  >
+                    <Undo2 size={16} />
+                  </button>
+                </Tooltip>
+                <div className="w-px h-3 bg-white/10 mx-1" />
+                <Tooltip text="Ver Línea de Tiempo de Versiones">
+                  <button 
+                    onClick={() => setShowVersionHistory(true)}
+                    disabled={undoStack.length === 0}
+                    className={`p-1.5 transition-all ${undoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
+                  >
+                    <Clock size={16} />
+                  </button>
+                </Tooltip>
+                <div className="w-px h-3 bg-white/10 mx-1" />
+                <Tooltip text="Rehacer (Ctrl+Y / Ctrl+Shift+Z)">
+                  <button 
+                    onClick={redo} 
+                    disabled={redoStack.length === 0}
+                    className={`p-1.5 transition-all ${redoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
+                  >
+                    <Redo2 size={16} />
+                  </button>
+                </Tooltip>
+              </div>
 
-            <div id="undo-redo-controls" className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full">
-              <Tooltip text="Deshacer (Ctrl+Z)">
-                <button 
-                  onClick={undo} 
-                  disabled={undoStack.length === 0}
-                  className={`p-1 transition-all ${undoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
-                >
-                  <Undo2 size={14} />
-                </button>
-              </Tooltip>
-              <div className="w-px h-3 bg-white/10 mx-1" />
-              <Tooltip text="Ver Línea de Tiempo de Versiones">
-                <button 
-                  onClick={() => setShowVersionHistory(true)}
-                  disabled={undoStack.length === 0}
-                  className={`p-1 transition-all ${undoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
-                >
-                  <Clock size={14} />
-                </button>
-              </Tooltip>
-              <div className="w-px h-3 bg-white/10 mx-1" />
-              <Tooltip text="Rehacer (Ctrl+Y / Ctrl+Shift+Z)">
-                <button 
-                  onClick={redo} 
-                  disabled={redoStack.length === 0}
-                  className={`p-1 transition-all ${redoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
-                >
-                  <Redo2 size={14} />
-                </button>
-              </Tooltip>
-            </div>
-
-            {/* Collaboration Presence */}
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full">
-              <Tooltip text="Ver Comentarios">
-                <button 
-                  onClick={() => setShowCommentsSidebar(!showCommentsSidebar)}
-                  className={`p-1.5 rounded-lg transition-all ${showCommentsSidebar ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}
-                >
-                  <MessageSquare size={14} />
-                </button>
-              </Tooltip>
-              <div className="w-px h-3 bg-white/10 mx-1" />
-              <Tooltip text="Invitar a Colaborar">
-                <button 
-                  onClick={() => {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("room", roomId);
-                    navigator.clipboard.writeText(url.toString());
-                    addLog("COLLABORATION: INVITE LINK COPIED TO CLIPBOARD");
-                  }}
-                  className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors"
-                >
-                  <Users size={14} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">{remoteUsers.length + 1}</span>
-                </button>
-              </Tooltip>
+              <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full shadow-2xl backdrop-blur-md">
+                <Tooltip text="Ver Comentarios">
+                  <button 
+                    onClick={() => setShowCommentsSidebar(!showCommentsSidebar)}
+                    className={`p-1.5 rounded-lg transition-all ${showCommentsSidebar ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}
+                  >
+                    <MessageSquare size={16} />
+                  </button>
+                </Tooltip>
+                <div className="w-px h-3 bg-white/10 mx-1" />
+                <Tooltip text="Invitar a Colaborar">
+                  <button 
+                    onClick={() => {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set("room", roomId);
+                      navigator.clipboard.writeText(url.toString());
+                      addLog("COLLABORATION: INVITE LINK COPIED");
+                    }}
+                    className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors"
+                  >
+                    <Users size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">{remoteUsers.length + 1}</span>
+                  </button>
+                </Tooltip>
+              </div>
             </div>
           </div>
-          <h1 className="text-4xl sm:text-6xl md:text-8xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-700 select-none">MASTER CONTROL</h1>
         </header>
 
-        <nav id="mode-selector" className="flex justify-center">
-          <div className="flex flex-col items-center gap-6 w-full">
-            <div className="flex flex-wrap justify-center gap-2 p-1.5 bg-zinc-900/50 rounded-2xl border border-white/5 backdrop-blur-xl">
-              {[
-                { 
-                  group: "Creation", 
-                  modes: [
-                    { id: "generate", icon: <Sparkles size={14}/>, tip: "Creación Neural desde Instrucciones" },
-                    { id: "concept", icon: <Palette size={14}/>, tip: "Arte Conceptual y World-building" },
-                    { id: "worldbuilding", icon: <Monitor size={14}/>, tip: "Generación de Universos Visuales Coherentes" },
-                    { id: "mockup", icon: <Box size={14}/>, tip: "Generación de Mockups Profesionales" },
-                    { id: "asset", icon: <Layout size={14}/>, tip: "Creación de Assets y UI" },
-                    { id: "texture", icon: <Spline size={14}/>, tip: "Generación de Texturas y Materiales Técnicos" }
-                  ] 
-                },
-                { 
-                  group: "Editing", 
-                  modes: [
-                    { id: "edit", icon: <Brush size={14}/>, tip: "Alteración Estructural de Imágenes" },
-                    { id: "inpaint", icon: <Scan size={14}/>, tip: "Regeneración Localizada mediante Máscaras" },
-                    { id: "color-grading", icon: <Contrast size={14}/>, tip: "Corrección de Color y Etalonaje Digital" },
-                    { id: "style-transfer", icon: <Wand2 size={14}/>, tip: "Transferencia de Estilo Artístico Neural" },
-                    { id: "upscale", icon: <Maximize size={14}/>, tip: "Aumento de Resolución y Detalle mediante IA" }
-                  ]
-                },
-                { 
-                  group: "Advanced", 
-                  modes: [
-                    { id: "vision", icon: <Eye size={14}/>, tip: "Descodificación y Análisis de Assets" },
-                    { id: "evolution", icon: <Activity size={14}/>, tip: "Refinamiento Iterativo de ADN Visual" },
-                    { id: "dataset", icon: <FileCode size={14}/>, tip: "Generación de Datasets Visuales" }
-                  ]
-                }
-              ].map((group, gIdx) => (
-                <div key={group.group} className="flex items-center gap-1.5 px-3 border-r last:border-r-0 border-white/5">
-                  <span className="text-[7px] font-black text-zinc-600 uppercase tracking-widest mr-2">{group.group}</span>
-                  <div className="flex gap-1">
-                    {group.modes.map((m) => (
-                      <Tooltip key={m.id} text={m.tip}>
-                        <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => handleModeChange(m.id as Mode)}
-                          className={`p-2.5 rounded-xl transition-all flex items-center gap-2 relative group-btn ${
-                            mode === m.id 
-                              ? "bg-white text-black shadow-xl" 
-                              : "text-zinc-500 hover:text-zinc-200 hover:bg-white/5"
-                          }`}
-                        >
-                          {m.icon}
-                          <span className={`text-[8px] font-black uppercase tracking-widest whitespace-nowrap overflow-hidden transition-all duration-300 ${mode === m.id ? 'max-w-xs ml-1' : 'max-w-0'}`}>
-                            {m.id.replace('-', ' ')}
-                          </span>
-                          {mode === m.id && (
-                            <motion.div 
-                              layoutId="active-mode"
-                              className="absolute inset-0 bg-white rounded-xl -z-10"
-                              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                            />
-                          )}
-                        </motion.button>
-                      </Tooltip>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+        <nav id="mode-selector" className="flex justify-center w-full px-4 mb-16">
+          <div className="w-full max-w-2xl bg-zinc-900/40 rounded-[3rem] border border-white/5 backdrop-blur-3xl p-8 sm:p-10 flex flex-col gap-8 shadow-2xl relative group-nav">
+             <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 blur-[120px] -z-10 group-hover:bg-amber-500/10 transition-all duration-700" />
+             
+             {[
+               { 
+                 group: "Creation", 
+                 modes: [
+                   { id: "generate", icon: <Sparkles size={16}/>, tip: "Creación Neural desde Instrucciones" },
+                   { id: "concept", icon: <Palette size={16}/>, tip: "Arte Conceptual y World-building" },
+                   { id: "worldbuilding", icon: <Monitor size={16}/>, tip: "Generación de Universos Visuales Coherentes" },
+                   { id: "mockup", icon: <Box size={16}/>, tip: "Generación de Mockups Profesionales" },
+                   { id: "asset", icon: <Layout size={16}/>, tip: "Creación de Assets y UI" },
+                   { id: "texture", icon: <Spline size={16}/>, tip: "Generación de Texturas y Materiales Técnicos" }
+                 ] 
+               },
+               { 
+                 group: "Editing", 
+                 modes: [
+                   { id: "edit", icon: <Brush size={16}/>, tip: "Alteración Estructural de Imágenes" },
+                   { id: "inpaint", icon: <Scan size={16}/>, tip: "Regeneración Localizada mediante Máscaras" },
+                   { id: "color-grading", icon: <Contrast size={16}/>, tip: "Corrección de Color y Etalonaje Digital" },
+                   { id: "style-transfer", icon: <Wand2 size={16}/>, tip: "Transferencia de Estilo Artístico Neural" },
+                   { id: "upscale", icon: <Maximize size={16}/>, tip: "Aumento de Resolución y Detalle mediante IA" }
+                 ]
+               },
+               { 
+                 group: "Advanced", 
+                 modes: [
+                   { id: "vision", icon: <Eye size={16}/>, tip: "Descodificación y Análisis de Assets" },
+                   { id: "evolution", icon: <Activity size={16}/>, tip: "Refinamiento Iterativo de ADN Visual" },
+                   { id: "dataset", icon: <FileCode size={16}/>, tip: "Generación de Datasets Visuales" }
+                 ]
+               }
+             ].map((group) => (
+               <div key={group.group} className="flex flex-col sm:flex-row items-center gap-4 sm:gap-10">
+                 <span className="w-full sm:w-24 text-[8px] sm:text-[9px] font-black text-zinc-600 uppercase tracking-[0.4em] select-none text-center sm:text-right shrink-0">{group.group}</span>
+                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6">
+                   {group.modes.map((m) => (
+                     <Tooltip key={m.id} text={m.tip}>
+                       <motion.button
+                         whileHover={{ scale: 1.1 }}
+                         whileTap={{ scale: 0.9 }}
+                         onClick={() => handleModeChange(m.id as Mode)}
+                         className={`p-3 rounded-2xl transition-all flex items-center gap-3 relative group-btn ${
+                           mode === m.id 
+                             ? "bg-white text-black shadow-[0_20px_50px_rgba(255,255,255,0.2)]" 
+                             : "text-zinc-500 hover:text-white"
+                         }`}
+                       >
+                         {m.icon}
+                         {mode === m.id && (
+                           <motion.span 
+                             initial={{ opacity: 0, x: -5 }}
+                             animate={{ opacity: 1, x: 0 }}
+                             className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap"
+                           >
+                             {m.id.replace('-', ' ')}
+                           </motion.span>
+                         )}
+                         {mode === m.id && (
+                           <motion.div 
+                             layoutId="active-mode-pill"
+                             className="absolute inset-0 bg-white rounded-2xl -z-10"
+                             transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                           />
+                         )}
+                       </motion.button>
+                     </Tooltip>
+                   ))}
+                 </div>
+               </div>
+             ))}
           </div>
         </nav>
 
         <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 w-full max-w-7xl">
-          <section className="lg:col-span-5 space-y-6">
+          <section className="order-last lg:order-first lg:col-span-5 space-y-6">
             <div className="space-y-4">
               <div className="flex justify-between items-center px-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)]">Neural Engine Selector</span>
@@ -3817,8 +3937,8 @@ export default function App(): React.ReactElement {
 
                   {/* Quick Presets */}
                   {!styleImage && (
-                    <div className="grid grid-cols-4 gap-2 px-2">
-                      {[
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-2">
+                       {[
                         { name: "Cyber", url: "https://picsum.photos/seed/cyber/400/225" },
                         { name: "Oil", url: "https://picsum.photos/seed/oil/400/225" },
                         { name: "Vogue", url: "https://picsum.photos/seed/vogue/400/225" },
@@ -3867,7 +3987,7 @@ export default function App(): React.ReactElement {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">Asset Type</label>
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-3 gap-1 sm:gap-2">
                       {[
                         { id: "icon", icon: <Grid3X3 size={12}/> },
                         { id: "component", icon: <Layout size={12}/> },
@@ -3886,7 +4006,7 @@ export default function App(): React.ReactElement {
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">Background Protocol</label>
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-3 gap-1 sm:gap-2">
                       {[
                         { id: "isolated", icon: <Box size={12}/> },
                         { id: "gradient", icon: <Droplets size={12}/> },
@@ -4428,7 +4548,7 @@ export default function App(): React.ReactElement {
                     <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">Multi-Synthesis</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[1, 2, 4, 8].map(count => (
                     <motion.button
                       key={count}
@@ -4475,7 +4595,7 @@ export default function App(): React.ReactElement {
             </div>
           </section>
 
-          <section className="lg:col-span-7 space-y-6 w-full">
+          <section className="order-first lg:order-last lg:col-span-7 space-y-6 w-full">
             <div className="relative glass aspect-square rounded-[3.5rem] overflow-hidden border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex items-center justify-center bg-zinc-950 group hover:scale-[1.01] transition-transform duration-500">
               {(resultImage || sourceImage || worldbuildResults || multiResults) ? (
                 <div className="w-full h-full flex flex-col items-center justify-center p-8 overflow-y-auto custom-scroll">
@@ -4739,11 +4859,21 @@ export default function App(): React.ReactElement {
                             <MessageSquare size={22} fill={isCommentMode ? "currentColor" : "none"} />
                           </motion.button>
                         </Tooltip>
-                        <Tooltip text="Upscale Neural 4K (Aumentar resolución y detalle 4x)">
+                        <Tooltip text="Upscale Neural 2K (Aumentar resolución y detalle 4x)">
                           <motion.button 
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => handleQuickUpscale(gradedImage || resultImage || sourceImage || "")} 
+                            onClick={() => handleQuickUpscale(gradedImage || resultImage || sourceImage || "", "4x")} 
+                            className="p-5 bg-black/80 backdrop-blur-xl text-blue-400 rounded-2xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl"
+                          >
+                            <Maximize size={22}/>
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="Upscale Neural 4K ULTRA (Aumentar resolución y detalle 8x)">
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => handleQuickUpscale(gradedImage || resultImage || sourceImage || "", "8x")} 
                             className="p-5 bg-black/80 backdrop-blur-xl text-amber-400 rounded-2xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl"
                           >
                             <Zap size={22}/>
@@ -4757,6 +4887,16 @@ export default function App(): React.ReactElement {
                             className="p-5 bg-black/80 backdrop-blur-xl text-pink-400 rounded-2xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl"
                           >
                             <Sparkles size={22}/>
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="Generar 4 Variaciones Neurales (Multi-Synthesis Edit)">
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleMultiVariation} 
+                            className="p-5 bg-black/80 backdrop-blur-xl text-indigo-400 rounded-2xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl"
+                          >
+                            <Grid3X3 size={22}/>
                           </motion.button>
                         </Tooltip>
                         <Tooltip text="Maximizar asset en ventana de resolución nativa (Alta Calidad)">
