@@ -64,6 +64,7 @@ import {
   Layout,
   History,
   X,
+  Check,
   HelpCircle,
   Copyright,
   Type as TypeIcon,
@@ -77,7 +78,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
-import { Mode, Preset, SyntergicDNA } from "./types";
+import { Mode, Preset, SyntergicDNA, BatchItem } from "./types";
 import { IMAGE_PRESETS } from "./constants";
 import { gemini } from "./services/geminiService";
 
@@ -140,7 +141,7 @@ export default function App(): React.ReactElement {
   const addToHistory = (item: Omit<HistoryItem, 'id' | 'timestamp'>) => {
     const newItem: HistoryItem = {
       ...item,
-      id: `HIST-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+      id: `HIST-${Math.random().toString(36).slice(2, 11).toUpperCase()}`,
       timestamp: new Date().toISOString(),
     };
     setHistory(prev => [newItem, ...prev]);
@@ -149,14 +150,16 @@ export default function App(): React.ReactElement {
   const exportHistory = () => {
     if (history.length === 0) return;
     const dataStr = JSON.stringify(history, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const exportFileDefaultName = `ia-studio-history-${new Date().toISOString()}.json`;
     const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('href', url);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
+    URL.revokeObjectURL(url);
   };
-  const [error, setError] = useState<{message: string, type: 'quota' | 'permission' | 'critical' | 'network' | null} | null>(null);
+  const [error, setError] = useState<{message: string, type: 'quota' | 'permission' | 'critical' | 'network' | 'warning' | null} | null>(null);
   const lastActionRef = useRef<(() => Promise<void>) | null>(null);
 
   // Network Awareness & Global Replay System
@@ -247,6 +250,12 @@ export default function App(): React.ReactElement {
               label: "Reintentar",
               onClick: () => retryLastAction()
             }
+          });
+          break;
+        case 'warning':
+          toast.warning("Advertencia del Sistema", {
+            description: message || "Se detectó una situación que requiere atención.",
+            duration: 5000,
           });
           break;
         case 'critical':
@@ -562,12 +571,182 @@ export default function App(): React.ReactElement {
   const [isComparing, setIsComparing] = useState(false);
   const [isSplitView, setIsSplitView] = useState(false);
   const [gradedImage, setGradedImage] = useState<string | null>(null);
+  const [evaluationData, setEvaluationData] = useState<{
+    score: number;
+    feedback: string;
+    metrics: { lambda: number; pi: number; deltaNu: number };
+  } | null>(null);
+  const [batchQueue, setBatchQueue] = useState<BatchItem[]>([]);
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [batchVariationCount, setBatchVariationCount] = useState<number>(1);
+  const [showBatchPanel, setShowBatchPanel] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [neuralResult, setNeuralResult] = useState<string | null>(null);
+  const [neuralProgress, setNeuralProgress] = useState<any>(null);
   const lutInputRef = useRef<HTMLInputElement>(null);
+
+  const runSAF = () => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      toast.error("Offline", { description: "Reconectando con el Motor SAF..." });
+      return;
+    }
+    if (!prompt || prompt.length < 5) return;
+    setNeuralResult(null);
+    setNeuralProgress({ attempt: 0, currentLambda: 0 });
+    socketRef.current.send(JSON.stringify({
+      type: "neural:run",
+      payload: { prompt }
+    }));
+    addLog(`NEURAL_SYSTEM: DISPATCHED SAF CYCLE`);
+  };
+
+  const SAFResultOverlay = () => {
+    if (!neuralProgress && !neuralResult) return null;
+    return (
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="fixed bottom-32 right-8 z-[300] w-96 glass rounded-[2.5rem] border border-white/10 shadow-2xl p-6 overflow-hidden"
+      >
+        <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800">
+           {neuralProgress && (
+             <motion.div 
+              className="h-full bg-amber-400 shadow-[0_0_10px_#fbbf24]"
+              animate={{ width: `${(neuralProgress.attempt / 5) * 100}%` }}
+             />
+           )}
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+             <div className="p-2 bg-amber-400 rounded-xl">
+               <Activity size={16} className="text-black" />
+             </div>
+             <div className="flex flex-col">
+               <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">A/C-ROI Optimizer</span>
+               <span className="text-[8px] text-zinc-500 uppercase font-bold tracking-tight">Syntergic Adaptive Framework</span>
+             </div>
+          </div>
+          <button onClick={() => { setNeuralResult(null); setNeuralProgress(null); }} className="text-zinc-600 hover:text-white transition-colors">
+            <X size={16}/>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {neuralProgress && (
+            <div className="space-y-3">
+              {neuralProgress.intuition && (
+                <div className="p-3 bg-white/5 rounded-2xl border border-white/5 flex flex-wrap gap-x-4 gap-y-2">
+                  <div className="flex flex-col">
+                    <span className="text-[6px] text-zinc-500 uppercase font-black">INTUICIÓN (IA₀)</span>
+                    <span className="text-[10px] font-black text-white">{(neuralProgress.intuition.predictedLambda * 100).toFixed(0)}% Λ</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[6px] text-zinc-500 uppercase font-black">CONFIANZA</span>
+                    <span className="text-[10px] font-black text-blue-400">{(neuralProgress.intuition.confidence * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[6px] text-zinc-500 uppercase font-black">EXP. COST</span>
+                    <span className="text-[10px] font-black text-rose-400">{(neuralProgress.intuition.predictedCost || 0).toFixed(1)}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[6px] text-zinc-500 uppercase font-black">ROI</span>
+                    <span className="text-[10px] font-black text-amber-400">{(neuralProgress.intuition.roi || 0).toFixed(3)}</span>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="p-3 bg-white/5 rounded-2xl border border-white/5">
+                   <span className="text-[7px] text-zinc-500 uppercase font-black block mb-1">INTENTOS (Π)</span>
+                   <span className="text-lg font-black text-white">{neuralProgress.attempt} / 3</span>
+                 </div>
+                 <div className="p-3 bg-white/5 rounded-2xl border border-white/5">
+                   <span className="text-[7px] text-zinc-500 uppercase font-black block mb-1">COHERENCIA (Λ)</span>
+                   <span className="text-lg font-black text-amber-400">{(neuralProgress.currentLambda * 100).toFixed(0)}%</span>
+                 </div>
+                 <div className="p-3 bg-white/5 rounded-2xl border border-white/5">
+                   <span className="text-[7px] text-zinc-500 uppercase font-black block mb-1">PREDICCIÓN (🔮)</span>
+                   <span className="text-lg font-black text-blue-400">{(neuralProgress.prediction * 100).toFixed(0)}%</span>
+                 </div>
+                 <div className="p-3 bg-white/5 rounded-2xl border border-white/5">
+                   <span className="text-[7px] text-zinc-500 uppercase font-black block mb-1">MODO (META)</span>
+                   <span className="text-lg font-black text-emerald-400 uppercase tracking-tighter">{neuralProgress.mode || '---'}</span>
+                 </div>
+              </div>
+              
+              <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex justify-between items-center">
+                 <span className="text-[7px] text-zinc-400 uppercase font-black">COSTO COGNITIVO</span>
+                 <span className="text-xs font-black text-indigo-400">{(neuralProgress.totalCost || 0).toFixed(2)} / 18.00</span>
+              </div>
+
+              <div className="px-1 flex items-center gap-2">
+                <div className="w-1 h-1 rounded-full bg-amber-500 animate-ping" />
+                <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">{neuralProgress.log || 'Thinking...'}</span>
+              </div>
+            </div>
+          )}
+
+          {neuralResult && (
+            <div className="space-y-3">
+               <div className="flex items-center gap-2 px-2">
+                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                 <span className="text-[10px] font-black text-emerald-400 tracking-widest uppercase">Stable Protocol Emitted</span>
+               </div>
+               <div className="p-5 bg-black/40 rounded-3xl border border-emerald-500/20 max-h-48 overflow-y-auto custom-scroll">
+                  <p className="text-[11px] text-zinc-300 leading-relaxed italic">"{neuralResult}"</p>
+               </div>
+               <button 
+                onClick={() => { setPrompt(neuralResult); setNeuralResult(null); setNeuralProgress(null); }}
+                className="w-full py-3 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all active:scale-95 shadow-lg"
+               >
+                 Aplicar Protocolo Optimizado
+               </button>
+            </div>
+          )}
+
+          {neuralProgress && !neuralResult && (
+             <div className="flex flex-col items-center gap-3 py-4">
+               <Loader2 className="animate-spin text-amber-400" size={32} />
+               <span className="text-[10px] font-black text-zinc-500 animate-pulse tracking-[0.2em]">OPTIMIZANDO CICLO COGNITIVO...</span>
+             </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
 
   // Undo/Redo History State
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
   const lastSavedStateRef = useRef<string>("");
+
+  const handleManualEvaluation = async () => {
+    if (!resultImage || !prompt) return;
+    setIsEvaluating(true);
+    addLog("C-ROI PROTOCOL: INITIATING MANUAL NEURAL EVALUATION");
+    try {
+      const evalData = await gemini.evaluateAsset(resultImage, prompt);
+      setEvaluationData(evalData);
+      addLog(`C-ROI FEEDBACK OPTIMIZED: SCORE ${evalData.score}/100`);
+      toast.success("Evaluación C-ROI completada con éxito");
+    } catch (err) {
+      addLog("C-ROI PROTOCOL: EVALUATION FAILURE");
+      toast.error("Fallo en la evaluación neural");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const applyEvaluationRefinement = () => {
+    if (!evaluationData?.feedback || !prompt) return;
+    
+    saveToHistory("C-ROI Refinement Applied");
+    const refinedPrompt = `${prompt}\n\n[C-ROI REFINEMENT: ${evaluationData.feedback}]`;
+    setPrompt(refinedPrompt);
+    addLog("C-ROI PROTOCOL: APPLIED NEURAL FEEDBACK TO CORE PROMPT");
+    setEvaluationData(null);
+    toast.success("Prompt refinado según feedback de la IA");
+  };
 
   const saveToHistory = useCallback((label: string = "Manual Snapshot") => {
     const currentState = {
@@ -761,6 +940,18 @@ export default function App(): React.ReactElement {
               [payload.userId]: { x: payload.x, y: payload.y, name: user.name, color: user.color }
             }));
           }
+          break;
+        case "neural:progress":
+          setNeuralProgress(payload);
+          break;
+        case "neural:complete":
+          setNeuralResult(payload.content || JSON.stringify(payload));
+          setNeuralProgress(null);
+          addLog("NEURAL_ENGINE: S.A.F. CYCLE COMPLETE");
+          break;
+        case "neural:error":
+          toast.error("Neural Failure", { description: payload.message });
+          setNeuralProgress(null);
           break;
       }
 
@@ -1065,6 +1256,170 @@ export default function App(): React.ReactElement {
       params: { lambda: 75, pi: 80, deltaNu: 40 }
     }
   ];
+
+  const BatchModeOverlay = () => {
+    if (!showBatchPanel) return null;
+
+    return (
+      <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/90 backdrop-blur-xl p-6 overflow-hidden">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="bg-[#0a0a0a] border border-white/10 rounded-[3rem] w-full max-w-5xl h-[85vh] flex flex-col shadow-[0_50px_100px_rgba(0,0,0,1)] relative"
+        >
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-30" />
+          
+          <div className="p-8 sm:p-12 border-b border-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+            <div className="flex items-center gap-6">
+              <div className="p-5 bg-amber-400/10 rounded-3xl border border-amber-400/20">
+                <Layers className="text-amber-400" size={32} />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.4em]">Neural Component</p>
+                <h2 className="text-4xl font-black tracking-tighter text-white">BATCH PROCESSOR</h2>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <input 
+                type="file" 
+                multiple 
+                accept="image/*"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []) as File[];
+                  Promise.all(files.map(f => new Promise<string>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target?.result as string);
+                    reader.readAsDataURL(f);
+                  }))).then(handleAddDataToBatch);
+                }}
+                className="hidden" 
+                id="batch-upload" 
+              />
+              <label htmlFor="batch-upload" className="px-6 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer flex items-center gap-2">
+                <Upload size={14} /> Añadir Assets
+              </label>
+              
+              <button 
+                onClick={() => setShowBatchPanel(false)}
+                className="p-3 bg-white/5 rounded-2xl text-zinc-500 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 flex overflow-hidden">
+            {/* Sidebar Controls */}
+            <div className="w-80 border-r border-white/5 p-8 space-y-8 overflow-y-auto no-scrollbar">
+              <div className="space-y-4">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Protocolo de Procesamiento</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    { id: 'upscale', name: 'Upscale 4K', icon: <Zap size={14}/> },
+                    { id: 'edit', name: 'Neural Edit', icon: <Brush size={14}/> },
+                    { id: 'style-transfer', name: 'Style Transfer', icon: <Palette size={14}/> }
+                  ].map(m => (
+                    <button 
+                      key={m.id}
+                      onClick={() => setMode(m.id as any)}
+                      className={`flex items-center gap-3 p-4 rounded-2xl border transition-all text-left ${mode === m.id ? 'bg-amber-400/10 border-amber-400 text-white shadow-lg shadow-amber-400/5' : 'bg-white/5 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                    >
+                      {m.icon}
+                      <span className="text-[10px] font-black uppercase tracking-widest">{m.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-white/5">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Fuerza de Variación (Δν)</p>
+                <div className="flex items-center justify-between">
+                  {([1, 2, 4, 8] as const).map(count => (
+                    <button 
+                      key={count}
+                      onClick={() => setVariationCount(count)}
+                      className={`w-10 h-10 rounded-xl border flex items-center justify-center text-[10px] font-black transition-all ${variationCount === count ? 'bg-white text-black border-white' : 'bg-white/5 border-white/10 text-zinc-500 hover:border-white/30'}`}
+                    >
+                      {count}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8">
+                <button 
+                  disabled={isBatchProcessing || batchQueue.length === 0}
+                  onClick={handleStartBatch}
+                  className={`w-full py-6 rounded-2xl font-black text-[11px] uppercase tracking-[0.3em] flex items-center justify-center gap-3 transition-all ${isBatchProcessing ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed' : 'bg-amber-500 text-black shadow-[0_20px_40px_-10px_rgba(245,158,11,0.3)] hover:bg-amber-400 hover:-translate-y-1'}`}
+                >
+                  {isBatchProcessing ? <Loader2 className="animate-spin" size={16}/> : <Zap size={16} fill="currentColor"/>}
+                  {isBatchProcessing ? 'PROCESANDO...' : 'START BATCH'}
+                </button>
+                <p className="mt-4 text-[8px] text-center text-zinc-600 font-bold uppercase tracking-widest">
+                  {batchQueue.filter(q => q.status === 'completed').length} de {batchQueue.length} completados
+                </p>
+              </div>
+            </div>
+
+            {/* Queue Preview */}
+            <div className="flex-1 p-8 overflow-y-auto no-scrollbar bg-black/20">
+              {batchQueue.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-zinc-700 space-y-6">
+                  <div className="p-10 bg-white/5 rounded-[3rem] border border-white/5 border-dashed">
+                    <ImageIcon size={64} strokeWidth={1} />
+                  </div>
+                  <div className="text-center space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em]">Cola de Procesamiento Vacía</p>
+                    <p className="text-[9px] font-medium text-zinc-600 lowercase tracking-widest">Arrastra imágenes o usa el botón de carga para empezar</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                  {batchQueue.map((item) => (
+                    <motion.div 
+                      key={item.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className={`relative aspect-square rounded-3xl overflow-hidden border transition-all ${item.status === 'processing' ? 'border-amber-400 ring-2 ring-amber-400/20' : item.status === 'completed' ? 'border-emerald-500/50' : 'border-white/5'}`}
+                    >
+                      <img src={item.result || item.source} className={`w-full h-full object-cover transition-all duration-700 ${item.status === 'processing' ? 'scale-110 blur-sm brightness-50' : ''}`} referrerPolicy="no-referrer" />
+                      
+                      {item.status === 'processing' && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                          <Loader2 className="text-amber-400 animate-spin" size={24} />
+                          <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">Sintetizando</span>
+                        </div>
+                      )}
+
+                      {item.status === 'completed' && (
+                        <div className="absolute top-3 right-3 p-1.5 bg-emerald-500 rounded-full shadow-lg">
+                          <Check size={10} className="text-white" />
+                        </div>
+                      )}
+
+                      <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black to-transparent">
+                         <div className="flex justify-between items-center">
+                            <span className="text-[8px] font-mono text-zinc-500">{item.id}</span>
+                            <button 
+                              onClick={() => setBatchQueue(prev => prev.filter(q => q.id !== item.id))}
+                              className="p-1 text-zinc-600 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                         </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  };
 
   const PromptGuideOverlay = () => {
     if (!showPromptGuide) return null;
@@ -2075,6 +2430,60 @@ export default function App(): React.ReactElement {
     });
   };
 
+  const handleAddDataToBatch = (images: string[]) => {
+    const newItems: BatchItem[] = images.map(img => ({
+      id: `BATCH-${Math.random().toString(36).slice(2, 11).toUpperCase()}`,
+      source: img,
+      status: 'pending'
+    }));
+    setBatchQueue(prev => [...prev, ...newItems]);
+    toast.success(`${images.length} imágenes añadidas a la cola de procesamiento`);
+  };
+
+  const handleStartBatch = async () => {
+    if (batchQueue.length === 0) {
+      toast.error("La cola de procesamiento está vacía");
+      return;
+    }
+    
+    setIsBatchProcessing(true);
+    addLog(`BATCH: INICIANDO PROCESAMIENTO DE ${batchQueue.length} ASSETS`);
+
+    const updatedQueue = [...batchQueue];
+
+    for (let i = 0; i < updatedQueue.length; i++) {
+       const item = updatedQueue[i];
+       if (item.status === 'completed') continue;
+
+       setBatchQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'processing' } : q));
+       addLog(`BATCH: PROCESANDO ITEM ${i + 1}/${updatedQueue.length}`);
+
+       try {
+         let result: string;
+         if (mode === "upscale") {
+           result = await gemini.upscaleImage(item.source, upscaleFactor, aspectRatio);
+         } else if (mode === "edit") {
+           result = await gemini.editImage(item.source, prompt, activePreset?.prompt, highQuality, aspectRatio, negativePrompt);
+         } else if (mode === "style-transfer") {
+           result = await gemini.styleTransfer(item.source, styleImage!, prompt, Math.round(styleIntensity * 100), negativePrompt);
+         } else {
+           // Fallback to upscale if no compatible mode is active for batch
+           result = await gemini.upscaleImage(item.source, upscaleFactor, aspectRatio);
+         }
+
+         setBatchQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'completed', result } : q));
+         addToHistory({ mode: `batch-${mode}`, prompt: `Batch Processed (${mode})`, params: syntergicParams, image: result });
+       } catch (err: any) {
+         console.error("Batch item failed:", err);
+         setBatchQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'failed', error: err.message } : q));
+       }
+    }
+
+    setIsBatchProcessing(false);
+    addLog(`BATCH: PROCESAMIENTO FINALIZADO`);
+    toast.success("Procesamiento por lotes completado");
+  };
+
   const handleExecution = async () => {
     // 💾 Save last action for potential retry
     lastActionRef.current = handleExecution;
@@ -2107,6 +2516,7 @@ export default function App(): React.ReactElement {
 
     setLoading(true);
     setError(null);
+    setEvaluationData(null);
     setAnalysisData(null);
     setWorldbuildResults(null);
     setMultiResults(null);
@@ -2268,7 +2678,7 @@ export default function App(): React.ReactElement {
 
         if (variationCount > 1) {
           const promises = Array.from({ length: variationCount }).map(() => 
-            gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt)
+            gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt, aspectRatio)
           );
           const results = await Promise.all(promises);
           setMultiResults(results);
@@ -2276,7 +2686,7 @@ export default function App(): React.ReactElement {
           results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
           saveToHistory(`Inpaint Variations: ${prompt.substring(0, 20)}...`);
         } else {
-          const res = await gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt);
+          const res = await gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt, aspectRatio);
           setResultImage(res);
           addToHistory({ mode, prompt, params: currentParams, image: res });
           saveToHistory(`Inpaint: ${prompt.substring(0, 20)}...`);
@@ -2311,7 +2721,7 @@ export default function App(): React.ReactElement {
             `Cycle ${i}/${evolutionCycles}: Optimization`
           ], 90, i > 1);
 
-          const res = await gemini.generateImage(`${currentIterPrompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, false, "1:1", negativePrompt);
+          const res = await gemini.generateImage(`${currentIterPrompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, false, aspectRatio, negativePrompt);
           setResultImage(res);
           addToHistory({ mode: `evolution-cycle-${i}`, prompt: currentIterPrompt, params: currentParams, image: res });
           setGradedImage(null);
@@ -2373,7 +2783,7 @@ export default function App(): React.ReactElement {
         
         if (variationCount > 1) {
           const promises = Array.from({ length: variationCount }).map(() => 
-            gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt)
+            gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt, aspectRatio)
           );
           const results = await Promise.all(promises);
           setMultiResults(results);
@@ -2381,7 +2791,7 @@ export default function App(): React.ReactElement {
           results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
           saveToHistory(`Style Variations: ${prompt.substring(0, 20)}...`);
         } else {
-          const res = await gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt);
+          const res = await gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt, aspectRatio);
           setResultImage(res);
           addToHistory({ mode, prompt, params: currentParams, image: res });
           saveToHistory(`Style: ${prompt.substring(0, 20)}...`);
@@ -2404,6 +2814,17 @@ export default function App(): React.ReactElement {
         setGradedImage(null);
         stopProgressSimulation("Upscale Neural Completado");
       }
+      if (mode !== "vision" && mode !== "color-grading") {
+        const finalAsset = resultImage || processedSource;
+        if (finalAsset) {
+          addLog("FEEDBACK: INITIATING SYNTERGIC EVALUATION (R⇄M)");
+          gemini.evaluateAsset(finalAsset, prompt).then(evalData => {
+            setEvaluationData(evalData);
+            if (evalData.score > 90) addLog(`SYSTEM: HIGH FIDELITY ASSET DETECTED (SCORE: ${evalData.score})`);
+          }).catch(() => null);
+        }
+      }
+      
       stopProgressSimulation();
     } catch (err: any) {
       if (progressIntervalRef.current) window.clearInterval(progressIntervalRef.current);
@@ -2693,7 +3114,6 @@ export default function App(): React.ReactElement {
       <TutorialOverlay />
       <HistoryOverlay />
       <VersionHistoryOverlay />
-      <PromptGuideOverlay />
       
       {/* Presence Sidebar */}
       <AnimatePresence>
@@ -2869,6 +3289,15 @@ export default function App(): React.ReactElement {
               >
                 <History size={14} />
                 <span className="text-[10px] font-black uppercase tracking-[0.2em]">Historial</span>
+              </button>
+            </Tooltip>
+            <Tooltip text="Procesamiento por Lotes (Batch)">
+              <button 
+                onClick={() => setShowBatchPanel(true)}
+                className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full hover:bg-white/10 transition-colors text-zinc-400 hover:text-white"
+              >
+                <Layers size={14} />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Batch</span>
               </button>
             </Tooltip>
             <Tooltip text={`Cambiar a modo ${theme === 'dark' ? 'claro' : 'oscuro'}`}>
@@ -4169,14 +4598,24 @@ export default function App(): React.ReactElement {
                     <span className="text-[8px] font-black uppercase tracking-widest">Neural Mode</span>
                   </button>
                 </div>
-                <button 
-                  onClick={handleSuggestEnhancements}
-                  disabled={isSuggesting || !prompt || prompt.length < 5}
-                  className="flex items-center gap-2 text-[9px] font-black text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-30 uppercase tracking-widest"
-                >
-                  {isSuggesting ? <Loader2 className="animate-spin" size={12}/> : <Sparkles size={12}/>}
-                  Sugerir Mejoras
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={handleSuggestEnhancements}
+                    disabled={isSuggesting || !prompt || prompt.length < 5}
+                    className="flex items-center gap-2 text-[9px] font-black text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-30 uppercase tracking-widest"
+                  >
+                    {isSuggesting ? <Loader2 className="animate-spin" size={12}/> : <Sparkles size={12}/>}
+                    Sugerir Mejoras
+                  </button>
+                  <button 
+                    onClick={runSAF}
+                    disabled={!!neuralProgress || !prompt || prompt.length < 5}
+                    className="flex items-center gap-2 text-[9px] font-black text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-30 uppercase tracking-widest pl-3 border-l border-white/10"
+                  >
+                    {neuralProgress ? <Loader2 className="animate-spin" size={12}/> : <Activity size={12}/>}
+                    SAF Adaptive Run
+                  </button>
+                </div>
               </div>
               <div className="flex gap-4">
                 {mode === 'inpaint' && maskPreview && (
@@ -4313,31 +4752,52 @@ export default function App(): React.ReactElement {
               </div>
             )}
 
-            <div className="glass rounded-[2rem] p-6 space-y-6 border border-white/5 shadow-2xl bg-gradient-to-br from-blue-900/10 to-black/60">
-              <div className="flex items-center justify-between text-[10px] font-black text-blue-400 uppercase tracking-widest">
-                <div className="flex items-center gap-2"><Maximize size={14}/> Frame Configuration</div>
-                <span className="text-zinc-500">{aspectRatio}</span>
+            <div className="glass rounded-[2rem] p-6 space-y-6 border border-white/5 shadow-2xl bg-gradient-to-br from-blue-900/20 to-black/80">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
+                    <Maximize size={14} className="animate-pulse" /> Frame Configuration
+                  </div>
+                  <span className="text-[8px] text-zinc-500 uppercase font-bold tracking-widest">Select target canvas geometry</span>
+                </div>
+                <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
+                  <span className="text-[10px] font-mono text-blue-300 font-black">{aspectRatio}</span>
+                </div>
               </div>
-              <div className="grid grid-cols-5 gap-2">
+
+              <div className="grid grid-cols-5 gap-3">
                 {[
-                  { label: "1:1", icon: <Square size={14}/>, tip: "Square (Instagram/Profile)" },
-                  { label: "16:9", icon: <RectangleHorizontal size={14}/>, tip: "Widescreen (Cinematic/YouTube)" },
-                  { label: "9:16", icon: <RectangleVertical size={14}/>, tip: "Portrait (TikTok/Stories)" },
-                  { label: "4:3", icon: <Monitor size={14}/>, tip: "Standard (Classic TV/Photography)" },
-                  { label: "3:4", icon: <Smartphone size={14}/>, tip: "Portrait (Classic Photography)" }
+                  { label: "1:1", icon: <Square size={16}/>, tip: "Square (1024x1024) - Profile/Social" },
+                  { label: "16:9", icon: <RectangleHorizontal size={16}/>, tip: "Widescreen (1792x1024) - Cinematic/YouTube" },
+                  { label: "9:16", icon: <RectangleVertical size={16}/>, tip: "Portrait (1024x1792) - Stories/TikTok" },
+                  { label: "4:3", icon: <Monitor size={16}/>, tip: "Standard (1344x1024) - Classic Photo" },
+                  { label: "3:4", icon: <Smartphone size={16}/>, tip: "Mobile (1024x1344) - Vertical Photo" }
                 ].map(ratio => (
                   <Tooltip key={ratio.label} text={ratio.tip}>
                     <motion.button
-                      whileHover={{ scale: 1.05 }}
+                      whileHover={{ scale: 1.05, y: -2 }}
                       whileTap={{ scale: 0.95 }}
-                      onClick={() => setAspectRatio(ratio.label)}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${aspectRatio === ratio.label ? "bg-blue-500/20 border-blue-400 text-white shadow-lg shadow-blue-500/10" : "bg-zinc-900/40 border-white/5 text-zinc-500 hover:text-white hover:border-white/10"}`}
+                      onClick={() => {
+                        setAspectRatio(ratio.label);
+                        addLog(`GEOMETRY: TARGET CANVAS SET TO ${ratio.label}`);
+                      }}
+                      className={`flex flex-col items-center justify-center gap-3 p-4 rounded-2xl border transition-all duration-300 ${aspectRatio === ratio.label 
+                        ? "bg-blue-500/20 border-blue-400 text-white shadow-[0_0_20px_rgba(59,130,246,0.3)] ring-1 ring-blue-400/50" 
+                        : "bg-zinc-900/60 border-white/5 text-zinc-500 hover:text-white hover:border-white/20 hover:bg-zinc-900"}`}
                     >
-                      {ratio.icon}
-                      <span className="text-[8px] font-black uppercase tracking-tighter">{ratio.label}</span>
+                      <div className={`transition-transform duration-500 ${aspectRatio === ratio.label ? "scale-110 rotate-0" : "scale-100 opacity-60"}`}>
+                        {ratio.icon}
+                      </div>
+                      <span className="text-[9px] font-black uppercase tracking-tighter">{ratio.label}</span>
                     </motion.button>
                   </Tooltip>
                 ))}
+              </div>
+              
+              <div className="pt-2 flex items-center gap-3 opacity-50">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                <span className="text-[7px] font-bold text-zinc-600 uppercase tracking-widest whitespace-nowrap">Neural Adaptive Framing</span>
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
               </div>
             </div>
 
@@ -4519,24 +4979,67 @@ export default function App(): React.ReactElement {
               </div>
             </div>
 
-            <div id="signature-dna" className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-2 custom-scroll">
-              {IMAGE_PRESETS.map(p => (
-                <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
-                  <motion.button 
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => { 
-                      saveToHistory(`Preset: ${p.name}`); 
-                      setActivePreset(p); 
-                      if (p.baseDNA) runAdaptivePass(p.baseDNA);
-                    }} 
-                    className={`w-full relative px-4 py-3 rounded-xl text-left border transition-all ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-xl" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20"}`}
-                  >
-                    <div className="text-[7px] font-black uppercase opacity-60 mb-1">{p.category}</div>
-                    <div className="text-[10px] font-bold truncate">{p.name}</div>
-                  </motion.button>
-                </Tooltip>
-              ))}
+            <div id="signature-dna" className="space-y-4">
+               <div className="flex items-center justify-between px-2">
+                 <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
+                   <Palette size={12} className="text-amber-400" /> Neural Presets Archive
+                 </p>
+                 <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">{IMAGE_PRESETS.length} Protocols</span>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-2 custom-scroll">
+                {IMAGE_PRESETS.map(p => (
+                  <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
+                    <motion.button 
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => { 
+                        saveToHistory(`Preset: ${p.name}`); 
+                        setActivePreset(p); 
+                        if (p.baseDNA) {
+                          setSyntergicParams(p.baseDNA);
+                          addLog(`PRESET_PROTOCOL: APPLIED ${p.name.toUpperCase()} DNA`);
+                        }
+                        toast.success(`Preset Seleccionado: ${p.name}`, {
+                           description: `Motor configurado para modo ${p.category}.`
+                        });
+                      }} 
+                      className={`group w-full relative p-4 rounded-2xl text-left border transition-all duration-300 ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-[0_15px_30px_rgba(255,255,255,0.15)] z-10" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20 hover:bg-zinc-800/60"}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col min-w-0">
+                          <span className={`text-[8px] font-black uppercase tracking-widest mb-1 transition-colors ${activePreset?.id === p.id ? "text-zinc-600" : "text-zinc-500"}`}>
+                            {p.category}
+                          </span>
+                          <span className={`text-[11px] font-bold truncate leading-none ${activePreset?.id === p.id ? "text-black" : "text-white"}`}>
+                            {p.name}
+                          </span>
+                        </div>
+                        {p.color && (
+                          <div 
+                            className="w-3 h-3 rounded-full border border-black/10 shadow-sm shrink-0" 
+                            style={{ 
+                              background: p.color,
+                              boxShadow: activePreset?.id === p.id ? `0 0 10px ${p.color}44` : 'none'
+                             }} 
+                          />
+                        )}
+                      </div>
+                      
+                      {activePreset?.id === p.id && (
+                        <motion.div 
+                          layoutId="preset-active-indicator"
+                          className="absolute -right-1 -top-1 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center border-2 border-white shadow-xl"
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                        >
+                          <Check size={10} strokeWidth={4} />
+                        </motion.div>
+                      )}
+                    </motion.button>
+                  </Tooltip>
+                ))}
+              </div>
             </div>
 
             <div className="flex flex-col items-center gap-6">
@@ -4597,6 +5100,78 @@ export default function App(): React.ReactElement {
 
           <section className="order-first lg:order-last lg:col-span-7 space-y-6 w-full">
             <div className="relative glass aspect-square rounded-[3.5rem] overflow-hidden border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex items-center justify-center bg-zinc-950 group hover:scale-[1.01] transition-transform duration-500">
+              {evaluationData ? (
+                <div className="absolute top-8 right-8 z-[60]">
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex flex-col items-end gap-3"
+                  >
+                    <div className="px-4 py-2 bg-black/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl flex items-center gap-3">
+                      <div className="relative w-10 h-10 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90">
+                          <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/5" />
+                          <motion.circle 
+                            cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="2" 
+                            className="text-amber-400"
+                            strokeDasharray="113"
+                            initial={{ strokeDashoffset: 113 }}
+                            animate={{ strokeDashoffset: 113 - (113 * (evaluationData.score / 100)) }}
+                            transition={{ duration: 1.5, ease: "easeOut" }}
+                          />
+                        </svg>
+                        <span className="absolute text-[10px] font-black text-white">{evaluationData.score}</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">Syntergic Score</span>
+                        <span className="text-[7px] text-zinc-400 font-medium max-w-[120px] leading-tight mt-0.5">{evaluationData.feedback}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-1.5 self-end">
+                      {Object.entries(evaluationData.metrics).map(([key, val]: [string, any]) => (
+                        <div key={key} className="px-2 py-1 bg-white/5 backdrop-blur-md rounded-lg border border-white/5 flex flex-col items-center min-w-[35px]">
+                          <span className="text-[6px] font-black text-zinc-500 uppercase">{key === 'lambda' ? 'Λ' : key === 'pi' ? 'Π' : 'Δν'}</span>
+                          <span className="text-[8px] font-mono text-zinc-300">{val}%</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <Tooltip text="Inyectar feedback de la IA para refinar el prompt actual">
+                        <button 
+                          onClick={applyEvaluationRefinement}
+                          className="px-3 py-1.5 bg-amber-400/10 border border-amber-400/20 rounded-xl text-[8px] font-black text-amber-400 uppercase tracking-widest hover:bg-amber-400/20 transition-all flex items-center gap-1.5"
+                        >
+                          <RefreshCcw size={10} /> Refinar Ciclo
+                        </button>
+                      </Tooltip>
+                      <button 
+                        onClick={() => setEvaluationData(null)}
+                        className="p-1 text-zinc-600 hover:text-white transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              ) : (resultImage && (
+                <div className="absolute top-8 right-8 z-[60]">
+                   <Tooltip text="Someter el asset actual a una evaluación neural C-ROI completa">
+                     <motion.button
+                       whileHover={{ scale: 1.05 }}
+                       whileTap={{ scale: 0.95 }}
+                       disabled={isEvaluating}
+                       onClick={handleManualEvaluation}
+                       className="px-4 py-2 bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl text-[9px] font-black text-zinc-300 uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-all shadow-2xl"
+                     >
+                       {isEvaluating ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={14} className="text-emerald-400" />}
+                       {isEvaluating ? "Evaluando..." : "C-ROI EVALUATION"}
+                     </motion.button>
+                   </Tooltip>
+                </div>
+              ))}
+
               {(resultImage || sourceImage || worldbuildResults || multiResults) ? (
                 <div className="w-full h-full flex flex-col items-center justify-center p-8 overflow-y-auto custom-scroll">
                   {worldbuildResults ? (
@@ -5359,6 +5934,12 @@ export default function App(): React.ReactElement {
           </section>
         </main>
       </div>
+      
+      <AnimatePresence>
+        {showPromptGuide && <PromptGuideOverlay />}
+        {showBatchPanel && <BatchModeOverlay />}
+      </AnimatePresence>
+
       <style>{`
         .tutorial-highlight {
           outline: 4px solid #fbbf24 !important;
@@ -5404,6 +5985,7 @@ export default function App(): React.ReactElement {
           </feComponentTransfer>
         </filter>
       </svg>
+      <SAFResultOverlay />
     </div>
   );
 }

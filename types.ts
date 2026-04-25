@@ -56,3 +56,11 @@ export interface Comment {
   x: number;
   y: number;
 }
+
+export interface BatchItem {
+  id: string;
+  source: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  result?: string;
+  error?: string;
+}

@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { randomUUID } from "crypto";
+import { executeNeuralOperation } from "./lib/executeNeuralOperation";
 
 async function startServer() {
   const app = express();
@@ -64,10 +65,17 @@ async function startServer() {
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const roomId = url.searchParams.get("roomId") || "default";
     const userId = url.searchParams.get("userId") || randomUUID();
-    const userName = url.searchParams.get("userName") || `User-${userId.substr(0, 4)}`;
+    const userName = url.searchParams.get("userName") || `User-${userId.slice(0, 4)}`;
     
     ws.roomId = roomId;
     ws.userId = userId;
+
+    // Check room capacity (Max 50 users)
+    if (rooms[roomId] && Object.keys(rooms[roomId].users).length >= 50) {
+      console.warn(`[SERVER] Room ${roomId} at capacity. Rejecting ${userId}`);
+      ws.close(1008, "Room capacity reached");
+      return;
+    }
 
     if (!rooms[roomId]) {
       rooms[roomId] = {
@@ -115,7 +123,7 @@ async function startServer() {
       payload: rooms[roomId].users[userId]
     }, userId);
 
-    ws.on("message", (data) => {
+    ws.on("message", async (data) => {
       // Security: Limit payload size (5MB for images/state)
       if (data.toString().length > 5 * 1024 * 1024) {
         console.warn(`[SECURITY] Large payload rejected from ${userId}`);
@@ -126,10 +134,14 @@ async function startServer() {
         const message = JSON.parse(data.toString());
         const { type, payload } = message;
         
-        if (rooms[roomId]) rooms[roomId].lastActivity = Date.now();
+        if (!type || typeof type !== "string") return;
+        if (!rooms[roomId]) return;
+        
+        rooms[roomId].lastActivity = Date.now();
 
         switch (type) {
           case "state:update":
+            if (!payload || typeof payload !== "object") return;
             rooms[roomId].state = { ...rooms[roomId].state, ...payload };
             if (payload.mode && rooms[roomId].users[userId]) {
               rooms[roomId].users[userId].mode = payload.mode;
@@ -138,6 +150,7 @@ async function startServer() {
             break;
           
           case "user:update-mode":
+            if (!payload || typeof payload.mode !== "string") return;
             if (rooms[roomId].users[userId]) {
               rooms[roomId].users[userId].mode = payload.mode;
               broadcast(roomId, { type: "user:mode-updated", payload: { userId, mode: payload.mode } });
@@ -145,10 +158,17 @@ async function startServer() {
             break;
 
           case "user:typing":
-            broadcast(roomId, { type: "user:typing-status", payload: { userId, isTyping: payload.isTyping } }, userId);
+            broadcast(roomId, { type: "user:typing-status", payload: { userId, isTyping: !!payload.isTyping } }, userId);
             break;
 
           case "comment:add":
+            if (!payload || typeof payload.text !== "string" || payload.text.length > 1000) return;
+            
+            // Limit comments per room to 100 to prevent memory blowup
+            if (rooms[roomId].comments.length >= 100) {
+              rooms[roomId].comments.shift();
+            }
+
             const newComment = {
               id: randomUUID(),
               userId,
@@ -156,23 +176,39 @@ async function startServer() {
               userColor,
               text: payload.text,
               timestamp: new Date().toISOString(),
-              x: payload.x,
-              y: payload.y
+              x: Number(payload.x) || 0,
+              y: Number(payload.y) || 0
             };
             rooms[roomId].comments.push(newComment);
             broadcast(roomId, { type: "comment:added", payload: newComment });
             break;
 
           case "comment:delete":
+            if (!payload || typeof payload.id !== "string") return;
             rooms[roomId].comments = rooms[roomId].comments.filter(c => c.id !== payload.id);
             broadcast(roomId, { type: "comment:deleted", payload: { id: payload.id } });
             break;
 
           case "cursor:move":
+            if (!payload || typeof payload.x !== "number" || typeof payload.y !== "number") return;
             broadcast(roomId, {
               type: "cursor:moved",
               payload: { userId, x: payload.x, y: payload.y }
             }, userId);
+            break;
+
+          case "neural:run":
+            if (!payload || typeof payload.prompt !== "string") return;
+            try {
+              console.log(`[NEURAL] Starting SAF for ${userId}`);
+              const result = await executeNeuralOperation(payload.prompt, (update) => {
+                ws.send(JSON.stringify({ type: "neural:progress", payload: update }));
+              });
+              ws.send(JSON.stringify({ type: "neural:complete", payload: result }));
+            } catch (err) {
+              console.error("Neural Operation Error:", err);
+              ws.send(JSON.stringify({ type: "neural:error", payload: { message: "Cognitive cycle failed." } }));
+            }
             break;
         }
       } catch (err) {
