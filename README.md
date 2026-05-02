@@ -1,20 +1,36 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 🌌 Syntergic Master Control: IA Studio A+B
 
-# Run and deploy your AI Studio app
+**“Sin LoRAs. Sin suerte. Solo evolución dirigida.”**
 
-This contains everything you need to run your app locally.
+Syntergic Master Control is a self-improving AI image generation system that goes beyond "one-shot" prompts. It uses iterative refinement loops to align neural output precisely with a creator's intent.
 
-View your app in AI Studio: https://ai.studio/apps/d349da4b-d406-4dd0-be23-42da3c2f70ee
+## 🚀 Key Features
 
-## Run Locally
+- **Guided Evolution**: A recursive synthesis loop (Generate → Analyze → Improve → Regenerate).
+- **Neural Passport**: Built-in IP protection with SHA-512 security hashes and full provenance tracking.
+- **Syntergic Framework ($C$-ROI)**: 
+  - $C^\circ$ (Coherence): Structural integrity.
+  - $\Delta\nu$ (Variation): Controlled divergent creativity.
+  - $\Lambda$ (Alignment): Intent/Output convergence.
+- **Luxury Amplifier**: High-end editorial aesthetics out of the box.
 
-**Prerequisites:**  Node.js
+## 🛠️ Tech Stack
 
+- **Frontend**: React + Tailwind CSS + Framer Motion.
+- **AI Core**: Google GenAI SDK (Gemini series).
+- **Backend**: Express + Vite (Full-stack mode).
+- **Assets**: Dynamic Neural Watermarking.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 📖 Project Story
+
+*Extract of the Hackathon narrative:*
+
+### Inspiration
+The inspiration came from a clear limitation: current tools rely too much on luck. Syntergic Master Control transforms image generation into a deterministic, iterative, and intent-driven process.
+
+### Challenges
+Mantener coherencia visual entre iteraciones sin perder el "alma" de la imagen original fue nuestro mayor desafío técnico, resuelto mediante el motor de **Mutation Emergence**.
+
+---
+
+*For the full hackathon story, challenges, and future vision, see [HACKATHON.md](./HACKATHON.md).*

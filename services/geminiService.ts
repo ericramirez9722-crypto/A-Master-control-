@@ -98,7 +98,7 @@ export class GeminiService {
               aspectRatio: aspectRatio as any,
               imageSize: (model.includes('flash-image') && !model.includes('3.1')) ? undefined : "1K"
             },
-            tools: useSearch ? [{
+            tools: (useSearch && !model.includes("gemini-2.5")) ? [{
               googleSearch: {
                 searchTypes: {
                   webSearch: {},
@@ -110,12 +110,23 @@ export class GeminiService {
         });
 
         const parts = this.validateResponse(response, "generateImage");
+        let foundImage = false;
+        let textFeedback = "";
+
         for (const part of parts) {
           if (part.inlineData) {
             return `data:image/png;base64,${part.inlineData.data}`;
           }
+          if (part.text) {
+            textFeedback += part.text + " ";
+          }
         }
-        throw new Error("No image data found in the response.");
+        
+        const errorMsg = textFeedback 
+          ? `NEURAL_REJECTION: El motor no generó una imagen. Respuesta técnica: ${textFeedback.trim()}`
+          : "NEURAL_MISSING_DATA: El motor devolvió una respuesta exitosa pero sin datos de imagen binarios.";
+        
+        throw new Error(errorMsg);
       }, isPro);
     };
 
@@ -157,12 +168,19 @@ export class GeminiService {
         });
 
         const parts = this.validateResponse(response, "editImage");
+        let textFeedback = "";
         for (const part of parts) {
           if (part.inlineData) {
             return `data:image/png;base64,${part.inlineData.data}`;
           }
+          if (part.text) {
+            textFeedback += part.text + " ";
+          }
         }
-        throw new Error("Neural Engine failed to return edited data.");
+        const errorMsg = textFeedback 
+          ? `NEURAL_REJECTION: El motor no pudo editar la imagen. Respuesta técnica: ${textFeedback.trim()}`
+          : "Neural Engine failed to return edited data.";
+        throw new Error(errorMsg);
       }, isPro);
     };
 
@@ -209,12 +227,19 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       });
 
       const parts = this.validateResponse(response, "inpaintImage");
+      let textFeedback = "";
       for (const part of parts) {
         if (part.inlineData) {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
+        if (part.text) {
+          textFeedback += part.text + " ";
+        }
       }
-      throw new Error("Neural Engine failed to return inpainted data.");
+      const errorMsg = textFeedback 
+        ? `NEURAL_REJECTION: El motor no pudo realizar el inpainting. Respuesta técnica: ${textFeedback.trim()}`
+        : "Neural Engine failed to return inpainted data.";
+      throw new Error(errorMsg);
     });
   }
 
@@ -364,12 +389,19 @@ USER INTENT: ${prompt}${negativeInstruction}`;
       });
 
       const parts = this.validateResponse(response, "styleTransfer");
+      let textFeedback = "";
       for (const part of parts) {
         if (part.inlineData) {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
+        if (part.text) {
+          textFeedback += part.text + " ";
+        }
       }
-      throw new Error("Neural Engine failed to return style-transferred data.");
+      const errorMsg = textFeedback 
+        ? `NEURAL_REJECTION: El motor no pudo realizar la transferencia de estilo. Respuesta técnica: ${textFeedback.trim()}`
+        : "Neural Engine failed to return style-transferred data.";
+      throw new Error(errorMsg);
     });
   }
 
@@ -410,12 +442,19 @@ Remove any compression artifacts or noise.`;
         });
 
         const parts = this.validateResponse(response, "upscaleImage");
+        let textFeedback = "";
         for (const part of parts) {
           if (part.inlineData) {
             return `data:image/png;base64,${part.inlineData.data}`;
           }
+          if (part.text) {
+            textFeedback += part.text + " ";
+          }
         }
-        throw new Error("Neural Engine failed to return upscaled data.");
+        const errorMsg = textFeedback 
+          ? `NEURAL_REJECTION: El motor no pudo realizar el escalado. Respuesta técnica: ${textFeedback.trim()}`
+          : "Neural Engine failed to return upscaled data.";
+        throw new Error(errorMsg);
       }, isPro);
     };
 
@@ -466,7 +505,7 @@ Remove any compression artifacts or noise.`;
   async syntergicGenerate(
     prompt: string, 
     mode: 'mockup' | 'asset' | 'concept' | 'dataset' | 'worldbuilding',
-    params: { lambda: number; pi: number; deltaNu: number },
+    params: { lambda: number; protocol: number; entropy: number },
     highQuality: boolean = true,
     variationCount: number = 1,
     aspectRatio: string = "1:1",
@@ -489,8 +528,8 @@ Remove any compression artifacts or noise.`;
     const syntergicContext = `
 SYNTERGIC ENGINE ACTIVATED:
 Λ (Coherence/Intent): ${params.lambda}% - Strict adherence to structured intent.
-Π (Protocol/Execution): ${params.pi}% - Apply professional studio standards.
-Δν (Stylistic Variation): ${params.deltaNu}% - Controlled aesthetic entropy.
+Π (Protocol/Execution): ${params.protocol}% - Apply professional studio standards.
+Δν (Stylistic Variation): ${params.entropy}% - Controlled aesthetic entropy.
 
 TASK: ${mode.toUpperCase()}
 ${modeInstructions[mode]}
@@ -500,7 +539,7 @@ ${structuredPrompt}${negativeInstruction}
 `;
 
     const results: string[] = [];
-    const actualVariationCount = Math.max(variationCount, params.deltaNu > 70 ? 2 : 1);
+    const actualVariationCount = Math.max(variationCount, params.entropy > 70 ? 2 : 1);
 
     const callSyntergic = async (model: string, isPro: boolean) => {
       const variationTasks = Array.from({ length: actualVariationCount }).map((_, i) => {
@@ -521,12 +560,19 @@ ${structuredPrompt}${negativeInstruction}
           });
 
           const parts = this.validateResponse(response, "syntergicGenerate");
+          let textFeedback = "";
           for (const part of parts) {
             if (part.inlineData) {
               return `data:image/png;base64,${part.inlineData.data}`;
             }
+            if (part.text) {
+              textFeedback += part.text + " ";
+            }
           }
-          throw new Error("Syntergic Engine failed to synthesize visual data.");
+          const errorMsg = textFeedback 
+            ? `SYNTERGIC_REJECTION: Error en la síntesis. Respuesta técnica: ${textFeedback.trim()}`
+            : "Syntergic Engine failed to synthesize visual data.";
+          throw new Error(errorMsg);
         }, isPro);
       });
       return Promise.all(variationTasks);
@@ -545,13 +591,14 @@ ${structuredPrompt}${negativeInstruction}
 
   async worldbuild(
     universeIntent: string,
-    params: { lambda: number; pi: number; deltaNu: number }
+    params: { lambda: number; protocol: number; entropy: number },
+    aspectRatio: string = "1:1"
   ): Promise<{ category: string; image: string }[]> {
     const categories = ["Environment", "Vehicle", "Character", "Technology"];
     
     const tasks = categories.map(cat => (async () => {
       const catPrompt = `Part of a ${universeIntent} universe: A high-end ${cat} design.`;
-      const images = await this.syntergicGenerate(catPrompt, 'worldbuilding', params, true);
+      const images = await this.syntergicGenerate(catPrompt, 'worldbuilding', params, true, 1, aspectRatio);
       return { category: cat, image: images[0] };
     })());
 
@@ -615,7 +662,7 @@ ${structuredPrompt}${negativeInstruction}
             {
               "score": number,
               "feedback": "string",
-              "metrics": { "lambda": number, "pi": number, "deltaNu": number }
+              "metrics": { "lambda": number, "protocol": number, "entropy": number }
             }` }
           ]
         },

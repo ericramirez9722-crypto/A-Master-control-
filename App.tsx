@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import ReactMarkdown from 'react-markdown';
 import {
   Upload,
   Download,
@@ -38,7 +39,6 @@ import {
   AlertTriangle,
   CreditCard,
   ShieldAlert,
-  Info,
   Search,
   Filter,
   Calendar,
@@ -75,6 +75,16 @@ import {
   Moon,
   Wifi,
   WifiOff,
+  Film,
+  Wind,
+  Info,
+  Fingerprint,
+  Share2,
+  ArrowUpLeft,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ArrowDownRight,
+  CheckCircle2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
@@ -103,6 +113,31 @@ const Tooltip = ({ children, text, wide = false, title }: { children?: React.Rea
   </div>
 );
 
+interface ProvenanceData {
+  generationId: string;
+  engine: string;
+  timestamp: string;
+  author: string;
+  dna: {
+    lambda: number;
+    protocol: number;
+    entropy: number;
+  };
+  parameters: {
+    aspectRatio: string;
+    mode: string;
+    model: string;
+  };
+  securityHash: string;
+  ipEvents: IPEvent[];
+}
+
+interface IPEvent {
+  type: 'generation' | 'watermark' | 'export' | 'license';
+  timestamp: string;
+  details: string;
+}
+
 interface HistoryItem {
   id: string;
   timestamp: string;
@@ -110,6 +145,7 @@ interface HistoryItem {
   prompt: string;
   params: any;
   image: string;
+  provenance?: ProvenanceData;
 }
 
 const MAX_PROMPT_LENGTH = 15000;
@@ -132,17 +168,58 @@ export default function App(): React.ReactElement {
   const [styleImage, setStyleImage] = useState<string | null>(null);
   const [upscaleFactor, setUpscaleFactor] = useState<"2x" | "4x" | "8x">("2x");
   const [resultImage, setResultImage] = useState<string | null>(null);
+  const [currentProvenance, setCurrentProvenance] = useState<ProvenanceData | null>(null);
   const [aspectRatio, setAspectRatio] = useState<string>("1:1");
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState("");
   const [progress, setProgress] = useState(0);
   const [statusLog, setStatusLog] = useState<string[]>([]);
 
+  const generateProvenance = (item: Omit<HistoryItem, 'id' | 'timestamp'>): ProvenanceData => {
+    const genId = `PROV-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
+    const timestamp = new Date().toISOString();
+    
+    // Create a deterministic-looking hash based on prompt and image prefix
+    const combined = `${item.prompt}-${item.image.substring(0, 100)}`;
+    let hash = 0;
+    for (let i = 0; i < combined.length; i++) {
+      hash = ((hash << 5) - hash) + combined.charCodeAt(i);
+      hash |= 0;
+    }
+    const securityHash = `SHA-512::${Math.abs(hash).toString(16)}${Math.random().toString(16).slice(2, 8)}`;
+
+    return {
+      generationId: genId,
+      engine: "Syntergic Neural Engine v5.24",
+      timestamp,
+      author: "ID-STUDIO-CORE-AGENT",
+      dna: {
+        lambda: syntergicParams.lambda,
+        protocol: syntergicParams.protocol,
+        entropy: syntergicParams.entropy
+      },
+      parameters: {
+        aspectRatio,
+        mode: item.mode,
+        model: highQuality ? 'Gemini 3 Pro' : 'Gemini 2.5 Flash'
+      },
+      securityHash,
+      ipEvents: [
+        {
+          type: 'generation',
+          timestamp,
+          details: `Initial neural synthesis completed via ${highQuality ? 'Pro' : 'Flash'} core.`
+        }
+      ]
+    };
+  };
+
   const addToHistory = (item: Omit<HistoryItem, 'id' | 'timestamp'>) => {
     const newItem: HistoryItem = {
       ...item,
       id: `HIST-${Math.random().toString(36).slice(2, 11).toUpperCase()}`,
       timestamp: new Date().toISOString(),
+      provenance: item.provenance || generateProvenance(item)
     };
     setHistory(prev => [newItem, ...prev]);
   };
@@ -198,6 +275,7 @@ export default function App(): React.ReactElement {
   const [analysisData, setAnalysisData] = useState<any>(null);
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [highQuality, setHighQuality] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [useSearch, setUseSearch] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showPromptGuide, setShowPromptGuide] = useState(false);
@@ -442,6 +520,27 @@ export default function App(): React.ReactElement {
       
       setResultImage(watermarked);
       setGradedImage(null);
+      
+      if (currentProvenance) {
+        const updatedProv: ProvenanceData = {
+          ...currentProvenance,
+          ipEvents: [
+            ...currentProvenance.ipEvents,
+            {
+              type: 'watermark',
+              timestamp: new Date().toISOString(),
+              details: `Dynamic watermark applied: "${watermarkText || 'Logo'}" at ${watermarkPosition}.`
+            }
+          ]
+        };
+        const localParams = { 
+          luxury, realism, mutation, seed, highQuality, syntergicParams, styleIntensity, upscaleFactor, aspectRatio,
+          watermarkText, watermarkPosition, watermarkOpacity 
+        };
+        setCurrentProvenance(updatedProv);
+        addToHistory({ mode: 'watermark', prompt, params: localParams, image: watermarked, provenance: updatedProv });
+      }
+
       addLog("IP PROTECTION: WATERMARK EMBEDDED SUCCESSFULLY");
     } catch (err) {
       addLog("IP PROTECTION: FAILED TO EMBED WATERMARK");
@@ -498,6 +597,58 @@ export default function App(): React.ReactElement {
     addLog(`SYNTERGIC ADAPTATIVE PASS: Λ=${targetDNA.lambda} Π=${targetDNA.protocol} Δν=${targetDNA.entropy}`);
   }, [analyzeScene, syntergicParams]);
 
+  const suggestDNA = useCallback(() => {
+    const p = prompt.toLowerCase();
+    let lambda = 85;
+    let protocol = 90;
+    let entropy = 15;
+
+    const realismKeywords = ["photorealistic", "realistic", "4k", "8k", "detail", "skin", "texture", "physically accurate", "luxury", "professional", "studio", "lighting", "bokeh", "dslr", "hyperrealistic"];
+    const abstractKeywords = ["abstract", "surreal", "dreamy", "fluid", "cosmic", "psychedelic", "impossible", "concept", "imaginary", "distorted", "glitch", "vaporwave"];
+    const complexityKeywords = ["intricate", "complex", "ornate", "fractal", "dense", "cluttered", "detailed", "geometry", "mechanical", "cybernetic", "steampunk"];
+    const minimalKeywords = ["minimalist", "clean", "simple", "flat", "void", "minimal", "zen", "plain"];
+
+    let realismCount = realismKeywords.filter(k => p.includes(k)).length;
+    let abstractCount = abstractKeywords.filter(k => p.includes(k)).length;
+    let complexityCount = complexityKeywords.filter(k => p.includes(k)).length;
+    let minimalCount = minimalKeywords.filter(k => p.includes(k)).length;
+
+    if (realismCount > 0) {
+      lambda = Math.min(100, 85 + (realismCount * 5));
+      protocol = Math.min(100, 90 + (realismCount * 2));
+      entropy = Math.max(5, 15 - (realismCount * 2));
+    }
+
+    if (abstractCount > 0) {
+      lambda = Math.max(10, lambda - (abstractCount * 15));
+      protocol = Math.max(10, protocol - (abstractCount * 10));
+      entropy = Math.min(100, entropy + (abstractCount * 20));
+    }
+
+    if (complexityCount > 0) {
+      entropy = Math.min(100, entropy + (complexityCount * 10));
+      protocol = Math.min(100, protocol + (complexityCount * 5));
+    }
+
+    if (minimalCount > 0) {
+      entropy = Math.max(2, entropy - (minimalCount * 5));
+      protocol = Math.min(100, protocol + (minimalCount * 10));
+    }
+
+    // Final checks
+    lambda = Math.round(Math.max(0, Math.min(100, lambda)));
+    protocol = Math.round(Math.max(0, Math.min(100, protocol)));
+    entropy = Math.round(Math.max(0, Math.min(100, entropy)));
+
+    setSyntergicParams({ lambda, protocol, entropy });
+    
+    toast.success("ADN Sintergic Optimizado", {
+      description: `Configuración adaptada para: ${realismCount > abstractCount ? 'Realismo' : abstractCount > 0 ? 'Abstracción' : 'Equilibrio'}.`,
+      icon: <Wand2 size={14} className="text-amber-400" />
+    });
+    addLog(`SYNTERGIC AUTO-TUNE: Λ=${lambda} Π=${protocol} Δν=${entropy}`);
+  }, [prompt]);
+
   const mapLambda = (v: number) => v > 80 ? "coherent lighting, stable concepts" : v < 40 ? "diffuse lighting, abstract concept drift" : "balanced lighting";
   const mapProtocol = (v: number) => v > 80 ? "structured composition, geometric precision" : v < 40 ? "organic composition, relaxed topology" : "standard studio structure";
   const mapEntropy = (v: number) => v > 60 ? "heavy film grain, dense micro-particles, divergent details" : v < 20 ? "clean textures, deterministic framing" : "subtle film grain, standard detail density";
@@ -523,14 +674,8 @@ export default function App(): React.ReactElement {
   }, [hasKey]);
   const [showMaskPreview, setShowMaskPreview] = useState(true);
   const [ethicalProtocol, setEthicalProtocol] = useState(true);
-  const [provenanceData, setProvenanceData] = useState<{
-    id: string;
-    timestamp: string;
-    mode: string;
-    prompt: string;
-    model: string;
-    hash: string;
-  } | null>(null);
+  const [provenanceData, setProvenanceData] = useState<ProvenanceData | null>(null);
+  const [selectedProvenance, setSelectedProvenance] = useState<ProvenanceData | null>(null);
   const stopEvolutionRef = useRef(false);
 
   const [evolutionCycles, setEvolutionCycles] = useState(2);
@@ -567,6 +712,7 @@ export default function App(): React.ReactElement {
   const [lutSize, setLutSize] = useState<number>(0);
   const [lutName, setLutName] = useState<string>("");
   const [lutIntensity, setLutIntensity] = useState(1);
+  const [grainIntensity, setGrainIntensity] = useState(0);
   const [isApplyingLut, setIsApplyingLut] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [isSplitView, setIsSplitView] = useState(false);
@@ -746,6 +892,34 @@ export default function App(): React.ReactElement {
     addLog("C-ROI PROTOCOL: APPLIED NEURAL FEEDBACK TO CORE PROMPT");
     setEvaluationData(null);
     toast.success("Prompt refinado según feedback de la IA");
+  };
+
+  const mergeAnalysisKeywords = () => {
+    if (!analysisData) return;
+    
+    addLog("NEURAL ENGINE: SYNTHESIZING PROMPT WITH VISUAL ANALYSIS");
+    
+    const keywords = [
+      analysisData.scene?.mood,
+      analysisData.scene?.lighting,
+      analysisData.scene?.composition,
+      ...(analysisData.objects || []).map((o: any) => o.name)
+    ].filter(Boolean) as string[];
+    
+    const uniqueKeywords = Array.from(new Set(keywords));
+    const newKeywords = uniqueKeywords.filter(kw => 
+      !prompt.toLowerCase().includes(kw.toLowerCase()) && 
+      kw.length > 2
+    );
+    
+    if (newKeywords.length > 0) {
+      setPrompt(prev => `${prev}, ${newKeywords.join(", ")}`);
+      addLog(`PROTOCOL: MERGED ${newKeywords.length} CONTEXTUAL KEYWORDS`);
+      toast.success(`Añadidas ${newKeywords.length} palabras clave del análisis`);
+    } else {
+      toast.info("El prompt ya incluye la información principal del análisis");
+    }
+    setShowAnalysis(false);
   };
 
   const saveToHistory = useCallback((label: string = "Manual Snapshot") => {
@@ -1032,7 +1206,7 @@ export default function App(): React.ReactElement {
   // Auto-apply LUT when intensity or data changes
   useEffect(() => {
     const target = resultImage || sourceImage;
-    if (lutData && target && mode === "color-grading") {
+    if ((lutData || grainIntensity > 0) && target && mode === "color-grading") {
       const timer = setTimeout(async () => {
         setIsApplyingLut(true);
         try {
@@ -1046,7 +1220,7 @@ export default function App(): React.ReactElement {
       }, 150);
       return () => clearTimeout(timer);
     }
-  }, [lutIntensity, lutData, resultImage, sourceImage, mode]);
+  }, [lutIntensity, lutData, grainIntensity, resultImage, sourceImage, mode]);
 
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1232,28 +1406,28 @@ export default function App(): React.ReactElement {
       name: "Cyberpunk Metropolis",
       icon: <Cpu className="text-blue-400" size={16} />,
       prompt: "A sprawling cyberpunk metropolis at night, neon-lit skyscrapers, rain-slicked streets, flying vehicles, volumetric fog, cinematic lighting, ultra-detailed architecture.",
-      params: { lambda: 90, pi: 85, deltaNu: 20 }
+      params: { lambda: 90, protocol: 85, entropy: 20 }
     },
     {
       id: "fantasy",
       name: "Ethereal Citadel",
       icon: <Sparkles className="text-amber-400" size={16} />,
       prompt: "An ancient ethereal citadel floating above a sea of clouds, bioluminescent flora, crystalline towers, majestic waterfalls, golden hour lighting, magical atmosphere.",
-      params: { lambda: 80, pi: 75, deltaNu: 30 }
+      params: { lambda: 80, protocol: 75, entropy: 30 }
     },
     {
       id: "historical",
       name: "Victorian London",
       icon: <Clock className="text-stone-400" size={16} />,
       prompt: "Victorian London in the 1880s, cobblestone streets, gas lamps, horse-drawn carriages, thick fog, gothic architecture, sepia-toned cinematic photography.",
-      params: { lambda: 95, pi: 95, deltaNu: 5 }
+      params: { lambda: 95, protocol: 95, entropy: 5 }
     },
     {
       id: "nature",
       name: "Bioluminescent Jungle",
       icon: <Zap className="text-emerald-400" size={16} />,
       prompt: "A dense bioluminescent jungle on an alien planet, glowing exotic plants, giant mushrooms, vibrant spores in the air, deep twilight, immersive depth of field.",
-      params: { lambda: 75, pi: 80, deltaNu: 40 }
+      params: { lambda: 75, protocol: 80, entropy: 40 }
     }
   ];
 
@@ -1612,6 +1786,7 @@ export default function App(): React.ReactElement {
                       <button 
                         onClick={() => {
                           setResultImage(item.image);
+                          if (item.provenance) setProvenanceData(item.provenance);
                           setShowHistory(false);
                         }}
                         className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1623,7 +1798,18 @@ export default function App(): React.ReactElement {
                     </div>
                     <div className="p-6 flex-1 flex flex-col justify-between min-w-0">
                       <div className="space-y-2">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Prompt Neural</p>
+                        <div className="flex justify-between items-start">
+                          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Prompt Neural</p>
+                          {item.provenance && (
+                            <button 
+                              onClick={() => setSelectedProvenance(item.provenance!)}
+                              className="text-zinc-500 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
+                            >
+                              <ShieldCheck size={12} />
+                              <span className="text-[7px] font-black uppercase tracking-widest">Procedencia</span>
+                            </button>
+                          )}
+                        </div>
                         <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed italic">"{item.prompt}"</p>
                       </div>
                       <div className="flex items-center justify-between pt-4 border-t border-white/5">
@@ -1654,6 +1840,124 @@ export default function App(): React.ReactElement {
           )}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const NeuralPassportOverlay = () => {
+    if (!selectedProvenance) return null;
+
+    return (
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="absolute inset-0 bg-black/95 backdrop-blur-3xl" 
+          onClick={() => setSelectedProvenance(null)} 
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="relative bg-zinc-950 border border-white/10 w-full max-w-xl rounded-[2.5rem] overflow-hidden flex flex-col shadow-[0_0_80px_rgba(16,185,129,0.15)]"
+        >
+          <div className="p-10 border-b border-white/5 bg-gradient-to-br from-emerald-500/10 to-transparent">
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-emerald-500/10 rounded-3xl border border-emerald-500/20 shadow-inner">
+                  <ShieldCheck className="text-emerald-400" size={28} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-white uppercase tracking-[0.3em]">Neural Passport</h2>
+                  <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest mt-1">Certificado de Autenticidad Neural</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedProvenance(null)} className="p-2 text-zinc-500 hover:text-white transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-8">
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">ID de Procedencia</p>
+                <p className="text-sm font-mono text-zinc-200 tracking-tight">{selectedProvenance.generationId}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Hash de Seguridad</p>
+                <p className="text-[9px] font-mono text-zinc-400 truncate max-w-[180px]">{selectedProvenance.securityHash}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-10 space-y-8 overflow-y-auto max-h-[50vh] custom-scrollbar">
+            <div className="grid grid-cols-3 gap-6">
+              {[
+                { label: "Motor", val: selectedProvenance.engine, icon: <Activity size={14}/> },
+                { label: "Modelo", val: selectedProvenance.parameters.model, icon: <Cpu size={14}/> },
+                { label: "Aspecto", val: selectedProvenance.parameters.aspectRatio, icon: <Maximize size={14}/> }
+              ].map(stat => (
+                <div key={stat.label} className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                  <div className="flex items-center gap-2 mb-2 text-zinc-500">
+                    {stat.icon}
+                    <span className="text-[7px] font-black uppercase tracking-widest">{stat.label}</span>
+                  </div>
+                  <p className="text-[10px] font-bold text-zinc-200 uppercase truncate">{stat.val}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">DNA de Síntesis (Λ-Π-Δν)</h3>
+              <div className="bg-black/40 border border-white/5 rounded-3xl p-6 flex justify-around items-center">
+                <div className="text-center">
+                  <p className="text-2xl font-black text-white">{selectedProvenance.dna.lambda}%</p>
+                  <p className="text-[7px] text-zinc-600 uppercase font-black tracking-widest">Coherencia (Λ)</p>
+                </div>
+                <div className="h-10 w-px bg-white/5" />
+                <div className="text-center">
+                  <p className="text-2xl font-black text-white">{selectedProvenance.dna.protocol}%</p>
+                  <p className="text-[7px] text-zinc-600 uppercase font-black tracking-widest">Protocolo (Π)</p>
+                </div>
+                <div className="h-10 w-px bg-white/5" />
+                <div className="text-center">
+                  <p className="text-2xl font-black text-white">{selectedProvenance.dna.entropy}%</p>
+                  <p className="text-[7px] text-zinc-600 uppercase font-black tracking-widest">Entropía (Δν)</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1 flex items-center gap-2">
+                <History size={12}/> Historial de Eventos IP
+              </h3>
+              <div className="space-y-3">
+                {selectedProvenance.ipEvents.map((event, idx) => (
+                  <div key={idx} className="flex gap-4 group">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-2 h-2 rounded-full mt-1 ${event.type === 'generation' ? 'bg-emerald-500' : event.type === 'watermark' ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                      {idx < selectedProvenance.ipEvents.length - 1 && <div className="w-px flex-1 bg-white/5 my-1" />}
+                    </div>
+                    <div className="flex-1 pb-4">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[9px] font-black text-zinc-300 uppercase tracking-widest">{event.type}</span>
+                        <span className="text-[8px] text-zinc-600 font-mono italic">{new Date(event.timestamp).toLocaleString()}</span>
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-relaxed italic">"{event.details}"</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-8 bg-black/40 border-t border-white/5 flex gap-4">
+            <button className="flex-1 py-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500/20 transition-all flex items-center justify-center gap-2">
+              <Download size={14}/> Descargar Certificado
+            </button>
+            <button className="flex-1 py-4 bg-white/5 border border-white/10 text-zinc-400 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center gap-2">
+              <Share2 size={14}/> Verificar con Nodo
+            </button>
+          </div>
+        </motion.div>
       </div>
     );
   };
@@ -2080,6 +2384,17 @@ export default function App(): React.ReactElement {
     addLog(`LUT ENGINE: GENERATED ${type.toUpperCase()} PRESET`);
   };
 
+  const applyVintageFilm = () => {
+    generatePresetLUT('vintage');
+    setLutIntensity(0.7);
+    setGrainIntensity(0.15);
+    addLog("PROTOCOL: APPLYING VINTAGE FILM ARCHIVE (LUT 70% + SUBTLE GRAIN)");
+    toast.success("Efecto Vintage Film Aplicado", {
+      description: "LUT Vintage al 70% con granulado sutil.",
+      icon: <Film size={14} className="text-amber-400" />
+    });
+  };
+
   const onLUTUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2093,7 +2408,7 @@ export default function App(): React.ReactElement {
   };
 
   const applyLUTToImage = async (imageSrc: string) => {
-    if (!lutData || !lutSize) return imageSrc;
+    if ((!lutData || !lutSize) && grainIntensity === 0) return imageSrc;
     
     return new Promise<string>((resolve) => {
       const img = new Image();
@@ -2109,60 +2424,73 @@ export default function App(): React.ReactElement {
         ctx.drawImage(img, 0, 0);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-        const intensity = lutIntensity;
-        if (intensity === 0) return resolve(imageSrc);
-        const sizeMinusOne = lutSize - 1;
-        const sizeMinusTwo = lutSize - 2;
         
-        for (let i = 0; i < data.length; i += 4) {
-          const rOrig = data[i] / 255;
-          const gOrig = data[i+1] / 255;
-          const bOrig = data[i+2] / 255;
+        // 1) Apply LUT
+        if (lutData && lutSize > 0 && lutIntensity > 0) {
+          const intensity = lutIntensity;
+          const sizeMinusOne = lutSize - 1;
+          const sizeMinusTwo = lutSize - 2;
           
-          const rPos = rOrig * sizeMinusOne;
-          const gPos = gOrig * sizeMinusOne;
-          const bPos = bOrig * sizeMinusOne;
+          for (let i = 0; i < data.length; i += 4) {
+            const rOrig = data[i] / 255;
+            const gOrig = data[i+1] / 255;
+            const bOrig = data[i+2] / 255;
+            
+            const rPos = rOrig * sizeMinusOne;
+            const gPos = gOrig * sizeMinusOne;
+            const bPos = bOrig * sizeMinusOne;
 
-          const rIdx = Math.min(Math.floor(rPos), sizeMinusTwo);
-          const gIdx = Math.min(Math.floor(gPos), sizeMinusTwo);
-          const bIdx = Math.min(Math.floor(bPos), sizeMinusTwo);
-          
-          const rFrac = rPos - rIdx;
-          const gFrac = gPos - gIdx;
-          const bFrac = bPos - bIdx;
+            const rIdx = Math.min(Math.floor(rPos), sizeMinusTwo);
+            const gIdx = Math.min(Math.floor(gPos), sizeMinusTwo);
+            const bIdx = Math.min(Math.floor(bPos), sizeMinusTwo);
+            
+            const rFrac = rPos - rIdx;
+            const gFrac = gPos - gIdx;
+            const bFrac = bPos - bIdx;
 
-          const invR = 1 - rFrac;
-          const invG = 1 - gFrac;
-          const invB = 1 - bFrac;
+            const invR = 1 - rFrac;
+            const invG = 1 - gFrac;
+            const invB = 1 - bFrac;
 
-          const w000 = invR * invG * invB;
-          const w100 = rFrac * invG * invB;
-          const w010 = invR * gFrac * invB;
-          const w001 = invR * invG * bFrac;
-          const w110 = rFrac * gFrac * invB;
-          const w101 = rFrac * invG * bFrac;
-          const w011 = invR * gFrac * bFrac;
-          const w111 = rFrac * gFrac * bFrac;
-          
-          const c000 = lutData[rIdx][gIdx][bIdx];
-          const c100 = lutData[rIdx+1][gIdx][bIdx];
-          const c010 = lutData[rIdx][gIdx+1][bIdx];
-          const c001 = lutData[rIdx][gIdx][bIdx+1];
-          const c110 = lutData[rIdx+1][gIdx+1][bIdx];
-          const c101 = lutData[rIdx+1][gIdx][bIdx+1];
-          const c011 = lutData[rIdx][gIdx+1][bIdx+1];
-          const c111 = lutData[rIdx+1][gIdx+1][bIdx+1];
+            const w000 = invR * invG * invB;
+            const w100 = rFrac * invG * invB;
+            const w010 = invR * gFrac * invB;
+            const w001 = invR * invG * bFrac;
+            const w110 = rFrac * gFrac * invB;
+            const w101 = rFrac * invG * bFrac;
+            const w011 = invR * gFrac * bFrac;
+            const w111 = rFrac * gFrac * bFrac;
+            
+            const c000 = lutData[rIdx][gIdx][bIdx];
+            const c100 = lutData[rIdx+1][gIdx][bIdx];
+            const c010 = lutData[rIdx][gIdx+1][bIdx];
+            const c001 = lutData[rIdx][gIdx][bIdx+1];
+            const c110 = lutData[rIdx+1][gIdx+1][bIdx];
+            const c101 = lutData[rIdx+1][gIdx][bIdx+1];
+            const c011 = lutData[rIdx][gIdx+1][bIdx+1];
+            const c111 = lutData[rIdx+1][gIdx+1][bIdx+1];
 
-          const resR = c000[0] * w000 + c100[0] * w100 + c010[0] * w010 + c001[0] * w001 + 
-                       c110[0] * w110 + c101[0] * w101 + c011[0] * w011 + c111[0] * w111;
-          const resG = c000[1] * w000 + c100[1] * w100 + c010[1] * w010 + c001[1] * w001 + 
-                       c110[1] * w110 + c101[1] * w101 + c011[1] * w011 + c111[1] * w111;
-          const resB = c000[2] * w000 + c100[2] * w100 + c010[2] * w010 + c001[2] * w001 + 
-                       c110[2] * w110 + c101[2] * w101 + c011[2] * w011 + c111[2] * w111;
+            const resR = c000[0] * w000 + c100[0] * w100 + c010[0] * w010 + c001[0] * w001 + 
+                         c110[0] * w110 + c101[0] * w101 + c011[0] * w011 + c111[0] * w111;
+            const resG = c000[1] * w000 + c100[1] * w100 + c010[1] * w010 + c001[1] * w001 + 
+                         c110[1] * w110 + c101[1] * w101 + c011[1] * w011 + c111[1] * w111;
+            const resB = c000[2] * w000 + c100[2] * w100 + c010[2] * w010 + c001[2] * w001 + 
+                         c110[2] * w110 + c101[2] * w101 + c011[2] * w011 + c111[2] * w111;
 
-          data[i] = Math.round((rOrig * (1 - intensity) + resR * intensity) * 255);
-          data[i+1] = Math.round((gOrig * (1 - intensity) + resG * intensity) * 255);
-          data[i+2] = Math.round((bOrig * (1 - intensity) + resB * intensity) * 255);
+            data[i] = Math.round((rOrig * (1 - intensity) + resR * intensity) * 255);
+            data[i+1] = Math.round((gOrig * (1 - intensity) + resG * intensity) * 255);
+            data[i+2] = Math.round((bOrig * (1 - intensity) + resB * intensity) * 255);
+          }
+        }
+
+        // 2) Apply Film Grain
+        if (grainIntensity > 0) {
+          for (let i = 0; i < data.length; i += 4) {
+            const grain = (Math.random() - 0.5) * 50 * grainIntensity;
+            data[i] = Math.max(0, Math.min(255, data[i] + grain));
+            data[i+1] = Math.max(0, Math.min(255, data[i+1] + grain));
+            data[i+2] = Math.max(0, Math.min(255, data[i+2] + grain));
+          }
         }
         
         ctx.putImageData(imageData, 0, 0);
@@ -2330,23 +2658,21 @@ export default function App(): React.ReactElement {
       ]);
       const res = await gemini.upscaleImage(img, factor, aspectRatio);
       setResultImage(res);
-      addToHistory({ 
+      const prov = generateProvenance({ 
         mode: "upscale", 
         prompt: `Quick Upscale ${factor}`, 
         params: { upscaleFactor: factor, aspectRatio }, 
         image: res 
       });
+      setProvenanceData(prov);
       setGradedImage(null);
-      if (ethicalProtocol) {
-        setProvenanceData({
-          id: `SYN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-          timestamp: new Date().toISOString(),
-          mode: 'upscale',
-          prompt: `Neural Upscaling ${factor}`,
-          model: 'Gemini 3 Pro Image',
-          hash: Math.random().toString(36).substr(2, 16)
-        });
-      }
+      addToHistory({ 
+        mode: "upscale", 
+        prompt: `Quick Upscale ${factor}`, 
+        params: { upscaleFactor: factor, aspectRatio }, 
+        image: res,
+        provenance: prov
+      });
       stopProgressSimulation("Upscale Neural Completado");
     } catch (err: any) {
       addLog(`UPSCALING ERROR: ${err?.message || "Error motor neural."}`);
@@ -2472,7 +2798,13 @@ export default function App(): React.ReactElement {
          }
 
          setBatchQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'completed', result } : q));
-         addToHistory({ mode: `batch-${mode}`, prompt: `Batch Processed (${mode})`, params: syntergicParams, image: result });
+         const prov = generateProvenance({ 
+           mode: `batch-${mode}`, 
+           prompt: `Batch Processed (${mode})`, 
+           params: { luxury, realism, mutation, seed, highQuality, syntergicParams, styleIntensity, upscaleFactor, aspectRatio }, 
+           image: result 
+         });
+         addToHistory({ mode: `batch-${mode}`, prompt: `Batch Processed (${mode})`, params: syntergicParams, image: result, provenance: prov });
        } catch (err: any) {
          console.error("Batch item failed:", err);
          setBatchQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'failed', error: err.message } : q));
@@ -2553,26 +2885,24 @@ export default function App(): React.ReactElement {
           const results = await Promise.all(promises);
           setMultiResults(results);
           setResultImage(results[0]);
-          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          
+          results.forEach(res => {
+            const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+            addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
+            if (res === results[0]) setProvenanceData(prov);
+          });
+          
           saveToHistory(`Generación: ${prompt.substring(0, 20)}...`);
         } else {
           const res = await gemini.generateImage(`${prompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, useSearch, aspectRatio, negativePrompt);
           setResultImage(res);
-          addToHistory({ mode, prompt, params: currentParams, image: res });
+          const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+          setProvenanceData(prov);
+          addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
           saveToHistory(`Generación: ${prompt.substring(0, 20)}...`);
         }
         
         setGradedImage(null);
-        if (ethicalProtocol) {
-          setProvenanceData({
-            id: `GEN-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-            timestamp: new Date().toISOString(),
-            mode: 'generate',
-            prompt: prompt,
-            model: highQuality ? 'Gemini 3 Pro Image' : 'Gemini 2.5 Flash Image',
-            hash: Math.random().toString(36).substr(2, 16)
-          });
-        }
       } else if (mode === "mockup" || mode === "asset" || mode === "concept" || mode === "dataset") {
         startProgressSimulation([
           "Initializing Syntergic Core",
@@ -2595,11 +2925,17 @@ export default function App(): React.ReactElement {
         if (results.length > 1) {
           setMultiResults(results);
           setResultImage(results[0]);
-          results.forEach(img => addToHistory({ mode, prompt: finalPrompt, params: currentParams, image: img }));
+          results.forEach(img => {
+            const prov = generateProvenance({ mode, prompt: finalPrompt, params: currentParams, image: img });
+            addToHistory({ mode, prompt: finalPrompt, params: currentParams, image: img, provenance: prov });
+            if (img === results[0]) setProvenanceData(prov);
+          });
           saveToHistory(`Asset: ${prompt.substring(0, 20)}...`);
         } else {
           setResultImage(results[0]);
-          addToHistory({ mode, prompt: finalPrompt, params: currentParams, image: results[0] });
+          const prov = generateProvenance({ mode, prompt: finalPrompt, params: currentParams, image: results[0] });
+          setProvenanceData(prov);
+          addToHistory({ mode, prompt: finalPrompt, params: currentParams, image: results[0], provenance: prov });
           saveToHistory(`Asset: ${prompt.substring(0, 20)}...`);
         }
         setGradedImage(null);
@@ -2612,10 +2948,14 @@ export default function App(): React.ReactElement {
           "Simulating Character DNA",
           "Finalizing World Coherence"
         ]);
-        const results = await gemini.worldbuild(prompt, syntergicParams);
+        const results = await gemini.worldbuild(prompt, syntergicParams, aspectRatio);
         setWorldbuildResults(results);
         setResultImage(results[0].image);
-        results.forEach(res => addToHistory({ mode: `worldbuilding-${res.category}`, prompt: `${prompt} (${res.category})`, params: currentParams, image: res.image }));
+        results.forEach(res => {
+          const prov = generateProvenance({ mode: `worldbuilding-${res.category}`, prompt: `${prompt} (${res.category})`, params: currentParams, image: res.image });
+          addToHistory({ mode: `worldbuilding-${res.category}`, prompt: `${prompt} (${res.category})`, params: currentParams, image: res.image, provenance: prov });
+          if (res === results[0]) setProvenanceData(prov);
+        });
         saveToHistory(`Worldbuild: ${prompt.substring(0, 20)}...`);
       } else if (mode === "texture") {
         startProgressSimulation([
@@ -2638,7 +2978,9 @@ export default function App(): React.ReactElement {
         
         const res = await gemini.generateImage(texturePrompt, "Material", highQuality, useSearch, aspectRatio);
         setResultImage(res);
-        addToHistory({ mode, prompt: texturePrompt, params: { ...currentParams, materialType, surfaceDetail, isTiling }, image: res });
+        const prov = generateProvenance({ mode, prompt: texturePrompt, params: { ...currentParams, materialType, surfaceDetail, isTiling }, image: res });
+        setProvenanceData(prov);
+        addToHistory({ mode, prompt: texturePrompt, params: { ...currentParams, materialType, surfaceDetail, isTiling }, image: res, provenance: prov });
         saveToHistory(`Texture: ${prompt.substring(0, 20)}...`);
         setGradedImage(null);
       } else if (mode === "edit") {
@@ -2657,12 +2999,18 @@ export default function App(): React.ReactElement {
           const results = await Promise.all(promises);
           setMultiResults(results);
           setResultImage(results[0]);
-          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          results.forEach(res => {
+            const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+            addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
+            if (res === results[0]) setProvenanceData(prov);
+          });
           saveToHistory(`Edit Variations: ${prompt.substring(0, 20)}...`);
         } else {
           const res = await gemini.editImage(processedSource!, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, aspectRatio, negativePrompt);
           setResultImage(res);
-          addToHistory({ mode, prompt, params: currentParams, image: res });
+          const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+          setProvenanceData(prov);
+          addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
           saveToHistory(`Edit: ${prompt.substring(0, 20)}...`);
         }
         setGradedImage(null);
@@ -2683,12 +3031,18 @@ export default function App(): React.ReactElement {
           const results = await Promise.all(promises);
           setMultiResults(results);
           setResultImage(results[0]);
-          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          results.forEach(res => {
+            const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+            addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
+            if (res === results[0]) setProvenanceData(prov);
+          });
           saveToHistory(`Inpaint Variations: ${prompt.substring(0, 20)}...`);
         } else {
           const res = await gemini.inpaintImage(processedSource!, mask, `${prompt} ${syntheticInstructions}`, activePreset?.prompt, negativePrompt, aspectRatio);
           setResultImage(res);
-          addToHistory({ mode, prompt, params: currentParams, image: res });
+          const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+          setProvenanceData(prov);
+          addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
           saveToHistory(`Inpaint: ${prompt.substring(0, 20)}...`);
         }
         setGradedImage(null);
@@ -2723,7 +3077,9 @@ export default function App(): React.ReactElement {
 
           const res = await gemini.generateImage(`${currentIterPrompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, false, aspectRatio, negativePrompt);
           setResultImage(res);
-          addToHistory({ mode: `evolution-cycle-${i}`, prompt: currentIterPrompt, params: currentParams, image: res });
+          const prov = generateProvenance({ mode: `evolution-cycle-${i}`, prompt: currentIterPrompt, params: currentParams, image: res });
+          addToHistory({ mode: `evolution-cycle-${i}`, prompt: currentIterPrompt, params: currentParams, image: res, provenance: prov });
+          if (i === evolutionCycles) setProvenanceData(prov);
           setGradedImage(null);
           
           if (i < evolutionCycles) {
@@ -2788,12 +3144,18 @@ export default function App(): React.ReactElement {
           const results = await Promise.all(promises);
           setMultiResults(results);
           setResultImage(results[0]);
-          results.forEach(res => addToHistory({ mode, prompt, params: currentParams, image: res }));
+          results.forEach(res => {
+            const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+            addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
+            if (res === results[0]) setProvenanceData(prov);
+          });
           saveToHistory(`Style Variations: ${prompt.substring(0, 20)}...`);
         } else {
           const res = await gemini.styleTransfer(processedSource!, styleImage!, `${prompt} ${syntheticInstructions}`, Math.round(styleIntensity * 100), negativePrompt, aspectRatio);
           setResultImage(res);
-          addToHistory({ mode, prompt, params: currentParams, image: res });
+          const prov = generateProvenance({ mode, prompt, params: currentParams, image: res });
+          setProvenanceData(prov);
+          addToHistory({ mode, prompt, params: currentParams, image: res, provenance: prov });
           saveToHistory(`Style: ${prompt.substring(0, 20)}...`);
         }
         setGradedImage(null);
@@ -2809,7 +3171,9 @@ export default function App(): React.ReactElement {
         const target = resultImage || processedSource;
         const res = await gemini.upscaleImage(target!, upscaleFactor, aspectRatio);
         setResultImage(res);
-        addToHistory({ mode: `upscale-${upscaleFactor}`, prompt: "AI Upscale", params: currentParams, image: res });
+        const prov = generateProvenance({ mode: `upscale-${upscaleFactor}`, prompt: "AI Upscale", params: currentParams, image: res });
+        setProvenanceData(prov);
+        addToHistory({ mode: `upscale-${upscaleFactor}`, prompt: "AI Upscale", params: currentParams, image: res, provenance: prov });
         saveToHistory(`Upscale: ${upscaleFactor}`);
         setGradedImage(null);
         stopProgressSimulation("Upscale Neural Completado");
@@ -2996,7 +3360,7 @@ export default function App(): React.ReactElement {
             ctx.font = `${Math.max(12, canvas.width / 60)}px monospace`;
             ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
             ctx.textAlign = 'right';
-            ctx.fillText(`AI GENERATED | ${provenanceData.id} | ${provenanceData.model}`, canvas.width - 20, canvas.height - 20);
+            ctx.fillText(`AI GENERATED | ${provenanceData.generationId} | ${provenanceData.parameters.model}`, canvas.width - 20, canvas.height - 20);
             
             ctx.globalAlpha = 0.05;
             ctx.fillStyle = '#fff';
@@ -3114,6 +3478,7 @@ export default function App(): React.ReactElement {
       <TutorialOverlay />
       <HistoryOverlay />
       <VersionHistoryOverlay />
+      <NeuralPassportOverlay />
       
       {/* Presence Sidebar */}
       <AnimatePresence>
@@ -3258,6 +3623,15 @@ export default function App(): React.ReactElement {
       <div className="max-w-7xl w-full space-y-8">
         <header className="flex flex-col items-center space-y-4 mb-4 sm:mb-8 w-full px-2">
           <div className="flex flex-wrap justify-center items-center gap-2 sm:gap-4 overflow-x-auto sm:overflow-visible w-full sm:w-auto px-2 py-2 no-scrollbar">
+            <Tooltip text="Información del Proyecto y Visión">
+              <button 
+                onClick={() => setShowAbout(true)}
+                className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 px-4 py-1.5 rounded-full hover:bg-blue-500/20 transition-colors text-blue-400"
+              >
+                <Info size={14} />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Story</span>
+              </button>
+            </Tooltip>
             <Tooltip text="Motor de Síntesis Visual IA Studio v2.5/3.0">
               <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full cursor-help hover:bg-white/10 transition-colors">
                 <Crown size={14} className="text-amber-400" />
@@ -3340,7 +3714,19 @@ export default function App(): React.ReactElement {
           </div>
           
           <div className="flex flex-col items-center gap-4 w-full">
-            <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-700 select-none text-center">MASTER CONTROL</h1>
+            <div className="flex flex-col items-center">
+              <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-700 select-none text-center">MASTER CONTROL</h1>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                className="flex items-center gap-3 mt-2 px-4 py-1 bg-white/[0.02] border border-white/5 rounded-full"
+              >
+                <Sparkles size={12} className="text-blue-400 animate-pulse" />
+                <span className="text-[9px] sm:text-xs font-bold text-zinc-500 uppercase tracking-[0.4em]">Sin LoRAs. Sin suerte. Solo evolución dirigida.</span>
+                <Sparkles size={12} className="text-blue-400 animate-pulse" />
+              </motion.div>
+            </div>
             
             <div className="flex flex-wrap items-center justify-center gap-3">
               <div id="undo-redo-controls" className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full shadow-2xl backdrop-blur-md">
@@ -3636,12 +4022,22 @@ export default function App(): React.ReactElement {
                 </div>
                 <div className="flex items-center gap-2">
                   {showSyntergicControls ? <ChevronUp size={14} className="text-zinc-500 group-hover:text-white" /> : <ChevronDown size={14} className="text-zinc-500 group-hover:text-white" />}
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setSyntergicParams({ lambda: 85, protocol: 90, entropy: 15 }); }} 
-                    className="hover:rotate-180 transition-transform duration-700 p-1 text-zinc-500 hover:text-white"
-                  >
-                    <RotateCcw size={14}/>
-                  </button>
+                  <Tooltip text="Sugerir ADN basado en Prompt">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); suggestDNA(); }} 
+                      className="p-1 text-zinc-500 hover:text-amber-400 transition-colors"
+                    >
+                      <Wand2 size={14}/>
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Restablecer ADN Predeterminado">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setSyntergicParams({ lambda: 85, protocol: 90, entropy: 15 }); }} 
+                      className="hover:rotate-180 transition-transform duration-700 p-1 text-zinc-500 hover:text-white"
+                    >
+                      <RotateCcw size={14}/>
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -3904,21 +4300,29 @@ export default function App(): React.ReactElement {
                   
                   <div className="space-y-5">
                     {!lutData && (
-                      <div className="grid grid-cols-2 gap-2 mb-4">
-                        {[
-                          { id: 'teal-orange', name: 'Teal & Orange', color: 'bg-orange-500/20 text-orange-400' },
-                          { id: 'vintage', name: 'Vintage Film', color: 'bg-amber-500/20 text-amber-400' },
-                          { id: 'bw', name: 'B&W Contrast', color: 'bg-zinc-500/20 text-zinc-400' },
-                          { id: 'cyberpunk', name: 'Cyberpunk', color: 'bg-pink-500/20 text-pink-400' }
-                        ].map(p => (
-                          <button 
-                            key={p.id}
-                            onClick={() => generatePresetLUT(p.id as any)}
-                            className={`flex flex-col items-center justify-center p-3 rounded-2xl border border-white/5 hover:border-white/20 transition-all group ${p.color}`}
-                          >
-                            <span className="text-[8px] font-black uppercase tracking-widest">{p.name}</span>
-                          </button>
-                        ))}
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'teal-orange', name: 'Teal & Orange', color: 'bg-orange-500/20 text-orange-400' },
+                            { id: 'vintage', name: 'Vintage Film', color: 'bg-amber-500/20 text-amber-400' },
+                            { id: 'bw', name: 'B&W Contrast', color: 'bg-zinc-500/20 text-zinc-400' },
+                            { id: 'cyberpunk', name: 'Cyberpunk', color: 'bg-pink-500/20 text-pink-400' }
+                          ].map(p => (
+                            <button 
+                              key={p.id}
+                              onClick={() => generatePresetLUT(p.id as any)}
+                              className={`flex flex-col items-center justify-center p-3 rounded-2xl border border-white/5 hover:border-white/20 transition-all group ${p.color}`}
+                            >
+                              <span className="text-[8px] font-black uppercase tracking-widest">{p.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <button 
+                          onClick={applyVintageFilm}
+                          className="w-full py-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-[9px] font-black uppercase tracking-[0.3em] text-amber-400 hover:bg-amber-500/20 transition-all flex items-center justify-center gap-3"
+                        >
+                          <Film size={16} /> MASTER VINTAGE (LUT 70% + GRAIN)
+                        </button>
                       </div>
                     )}
 
@@ -3980,6 +4384,30 @@ export default function App(): React.ReactElement {
                             <span>Original</span>
                             <span>Neural Blend</span>
                             <span>Full Grade</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center px-1">
+                            <div className="flex items-center gap-2">
+                              <Wind size={12} className="text-amber-400" />
+                              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Grano Cinematográfico (Film Grain)</label>
+                            </div>
+                            <span className="text-[10px] font-mono text-amber-400 font-bold">{Math.round(grainIntensity * 100)}%</span>
+                          </div>
+                          <div className="relative h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div 
+                              className="absolute top-0 left-0 h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-300"
+                              style={{ width: `${grainIntensity * 100}%` }}
+                            />
+                            <input 
+                              type="range" min="0" max="1" step="0.01" 
+                              value={grainIntensity} 
+                              onChange={e => setGrainIntensity(+e.target.value)} 
+                              onMouseUp={() => saveToHistory("Ajuste de Grano")}
+                              onTouchEnd={() => saveToHistory("Ajuste de Grano")}
+                              className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                            />
                           </div>
                         </div>
 
@@ -4769,9 +5197,9 @@ export default function App(): React.ReactElement {
                 {[
                   { label: "1:1", icon: <Square size={16}/>, tip: "Square (1024x1024) - Profile/Social" },
                   { label: "16:9", icon: <RectangleHorizontal size={16}/>, tip: "Widescreen (1792x1024) - Cinematic/YouTube" },
+                  { label: "3:2", icon: <RectangleHorizontal size={16}/>, tip: "Classic Ratio (1536x1024) - Best for Thumbnails" },
                   { label: "9:16", icon: <RectangleVertical size={16}/>, tip: "Portrait (1024x1792) - Stories/TikTok" },
-                  { label: "4:3", icon: <Monitor size={16}/>, tip: "Standard (1344x1024) - Classic Photo" },
-                  { label: "3:4", icon: <Smartphone size={16}/>, tip: "Mobile (1024x1344) - Vertical Photo" }
+                  { label: "4:3", icon: <Monitor size={16}/>, tip: "Standard (1344x1024) - Classic Photo" }
                 ].map(ratio => (
                   <Tooltip key={ratio.label} text={ratio.tip}>
                     <motion.button
@@ -4834,93 +5262,133 @@ export default function App(): React.ReactElement {
               </div>
             </div>
 
-            {/* IP Protection & Watermarking Panel */}
-            <div className="glass rounded-[2rem] p-6 space-y-6 border border-white/5 shadow-2xl bg-gradient-to-br from-emerald-900/10 to-black/60">
+            {/* IP Protection & Advanced Governance Panel */}
+            <div className="glass rounded-[2rem] p-6 space-y-6 border border-white/5 shadow-2xl bg-gradient-to-br from-emerald-900/10 to-black/60 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[60px] -z-10" />
+              
               <div className="flex items-center justify-between text-[10px] font-black text-emerald-400 uppercase tracking-widest">
-                <div className="flex items-center gap-2"><Copyright size={14}/> IP Protection & Watermark</div>
-                <Tooltip text="Limpiar configuración de marca de agua">
-                  <button onClick={() => { setWatermarkText(""); setWatermarkLogo(null); }} className="hover:rotate-180 transition-transform duration-700 p-1 text-zinc-500 hover:text-white"><RotateCcw size={14}/></button>
-                </Tooltip>
+                <div className="flex items-center gap-2"><ShieldCheck size={14}/> IP PROTECTION & GOVERNANCE</div>
+                <div className="flex items-center gap-3">
+                  <Tooltip text="Neural Passport: Ver historial de procedencia y hash de seguridad">
+                    <button 
+                      disabled={!provenanceData}
+                      onClick={() => setSelectedProvenance(provenanceData)}
+                      className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/20 transition-all disabled:opacity-30 disabled:grayscale"
+                    >
+                      <Fingerprint size={12}/>
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Limpiar configuración">
+                    <button onClick={() => { setWatermarkText(""); setWatermarkLogo(null); }} className="hover:rotate-180 transition-transform duration-700 p-1 text-zinc-500 hover:text-white"><RotateCcw size={14}/></button>
+                  </Tooltip>
+                </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Texto de Marca</label>
-                  <div className="relative">
-                    <TypeIcon size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-                    <input 
-                      type="text" 
-                      value={watermarkText}
-                      onChange={(e) => {
-                        if (e.target.value.length <= MAX_WATERMARK_LENGTH) {
-                          setWatermarkText(e.target.value);
-                        }
-                      }}
-                      placeholder="© 2026 IA Studio..."
-                      className={`w-full bg-zinc-900/60 border rounded-xl py-2 pl-8 pr-4 text-[10px] text-zinc-300 outline-none transition-all ${watermarkText.length >= MAX_WATERMARK_LENGTH ? "border-red-500/50" : "border-white/5 focus:border-emerald-500/30"}`}
-                    />
-                    <div className={`absolute right-2 top-1/2 -translate-y-1/2 text-[6px] font-black ${watermarkText.length >= MAX_WATERMARK_LENGTH ? "text-red-500" : "text-zinc-600"}`}>
-                      {watermarkText.length}/{MAX_WATERMARK_LENGTH}
+              <div className="space-y-6">
+                {/* Neural Passport Quick Info */}
+                {provenanceData && (
+                  <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[8px] font-black text-emerald-500/60 uppercase tracking-widest">Passport Status</span>
+                      <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" /> Validated
+                      </span>
                     </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Logo / Firma</label>
+                    <p className="text-[10px] font-mono text-zinc-400 truncate tracking-tight">{provenanceData.generationId}</p>
                     <button 
-                      onClick={() => watermarkLogoInputRef.current?.click()}
-                      className={`w-full aspect-video rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 transition-all ${watermarkLogo ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10 hover:border-white/20'}`}
+                      onClick={() => setSelectedProvenance(provenanceData)}
+                      className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-[8px] font-black text-emerald-400 uppercase tracking-widest rounded-xl transition-all border border-emerald-500/20"
                     >
-                      {watermarkLogo ? (
-                        <img src={watermarkLogo} className="h-8 object-contain opacity-60" referrerPolicy="no-referrer" />
-                      ) : (
-                        <>
-                          <Upload size={14} className="text-zinc-600" />
-                          <span className="text-[7px] text-zinc-600 uppercase">Subir Logo</span>
-                        </>
-                      )}
+                      Abrir Pasaporte Neural Completo
                     </button>
-                    <input ref={watermarkLogoInputRef} type="file" hidden accept="image/*" onChange={onWatermarkLogoUpload} />
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Texto de Marca (Watermark)</label>
+                    <div className="relative">
+                      <TypeIcon size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+                      <input 
+                        type="text" 
+                        value={watermarkText}
+                        onChange={(e) => {
+                          if (e.target.value.length <= MAX_WATERMARK_LENGTH) {
+                            setWatermarkText(e.target.value);
+                          }
+                        }}
+                        placeholder="© 2026 IA Studio..."
+                        className={`w-full bg-zinc-900/60 border rounded-xl py-2 pl-8 pr-4 text-[10px] text-zinc-300 outline-none transition-all ${watermarkText.length >= MAX_WATERMARK_LENGTH ? "border-red-500/50" : "border-white/5 focus:border-emerald-500/30"}`}
+                      />
+                      <div className={`absolute right-2 top-1/2 -translate-y-1/2 text-[6px] font-black ${watermarkText.length >= MAX_WATERMARK_LENGTH ? "text-red-500" : "text-zinc-600"}`}>
+                        {watermarkText.length}/{MAX_WATERMARK_LENGTH}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Logo / Firma</label>
+                      <button 
+                        onClick={() => watermarkLogoInputRef.current?.click()}
+                        className={`w-full aspect-video rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 transition-all ${watermarkLogo ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/10 hover:border-white/20'}`}
+                      >
+                        {watermarkLogo ? (
+                          <img src={watermarkLogo} className="h-8 object-contain opacity-60" referrerPolicy="no-referrer" />
+                        ) : (
+                          <>
+                            <Upload size={14} className="text-zinc-600" />
+                            <span className="text-[7px] text-zinc-600 uppercase">Subir Logo</span>
+                          </>
+                        )}
+                      </button>
+                      <input ref={watermarkLogoInputRef} type="file" hidden accept="image/*" onChange={onWatermarkLogoUpload} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Posición</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {[
+                          { id: 'top-left', icon: <ArrowUpLeft size={10}/> },
+                          { id: 'top-right', icon: <ArrowUpRight size={10}/> },
+                          { id: 'center', icon: <Maximize size={10}/> },
+                          { id: 'bottom-left', icon: <ArrowDownLeft size={10}/> },
+                          { id: 'bottom-right', icon: <ArrowDownRight size={10}/> }
+                        ].map(pos => (
+                          <button 
+                            key={pos.id}
+                            onClick={() => setWatermarkPosition(pos.id as any)}
+                            className={`aspect-square rounded-lg border flex items-center justify-center transition-all ${watermarkPosition === pos.id ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-zinc-900/60 border-white/5 text-zinc-600 hover:border-white/20'}`}
+                          >
+                            {pos.icon}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">Posición</label>
-                    <div className="grid grid-cols-3 gap-1">
-                      {['top-left', 'top-right', 'center', 'bottom-left', 'bottom-right'].map(pos => (
-                        <button 
-                          key={pos}
-                          onClick={() => setWatermarkPosition(pos as any)}
-                          className={`aspect-square rounded-lg border flex items-center justify-center transition-all ${watermarkPosition === pos ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-zinc-900/60 border-white/5 text-zinc-600 hover:border-white/20'}`}
-                        >
-                          <Layout size={10} />
-                        </button>
-                      ))}
+                    <div className="flex justify-between text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">
+                      <span>Opacidad de Marca</span>
+                      <span>{Math.round(watermarkOpacity * 100)}%</span>
                     </div>
+                    <input 
+                      type="range" min="0.1" max="1" step="0.05"
+                      value={watermarkOpacity}
+                      onChange={(e) => setWatermarkOpacity(+e.target.value)}
+                      className="w-full h-1 bg-zinc-800 rounded-lg accent-emerald-500 cursor-ew-resize appearance-none"
+                    />
                   </div>
-                </div>
 
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[9px] font-bold text-zinc-500 uppercase tracking-widest px-1">
-                    <span>Opacidad</span>
-                    <span>{Math.round(watermarkOpacity * 100)}%</span>
-                  </div>
-                  <input 
-                    type="range" min="0.1" max="1" step="0.05"
-                    value={watermarkOpacity}
-                    onChange={(e) => setWatermarkOpacity(+e.target.value)}
-                    className="w-full h-1 bg-zinc-800 rounded-lg accent-emerald-500 cursor-ew-resize appearance-none"
-                  />
+                  <button 
+                    onClick={handleApplyWatermark}
+                    disabled={isWatermarking || (!watermarkText && !watermarkLogo) || (!resultImage && !sourceImage)}
+                    className="w-full py-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all disabled:opacity-30 flex items-center justify-center gap-2"
+                  >
+                    {isWatermarking ? <Loader2 className="animate-spin" size={12}/> : <CheckCircle2 size={12}/>}
+                    Incrustar Protección IP
+                  </button>
                 </div>
-
-                <button 
-                  onClick={handleApplyWatermark}
-                  disabled={isWatermarking || (!watermarkText && !watermarkLogo) || (!resultImage && !sourceImage)}
-                  className="w-full py-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all disabled:opacity-30 flex items-center justify-center gap-2"
-                >
-                  {isWatermarking ? <Loader2 className="animate-spin" size={12}/> : <ShieldCheck size={12}/>}
-                  Incrustar Marca de Agua
-                </button>
               </div>
             </div>
 
@@ -5131,7 +5599,7 @@ export default function App(): React.ReactElement {
                     <div className="flex gap-1.5 self-end">
                       {Object.entries(evaluationData.metrics).map(([key, val]: [string, any]) => (
                         <div key={key} className="px-2 py-1 bg-white/5 backdrop-blur-md rounded-lg border border-white/5 flex flex-col items-center min-w-[35px]">
-                          <span className="text-[6px] font-black text-zinc-500 uppercase">{key === 'lambda' ? 'Λ' : key === 'pi' ? 'Π' : 'Δν'}</span>
+                          <span className="text-[6px] font-black text-zinc-500 uppercase">{key === 'lambda' ? 'Λ' : key === 'protocol' ? 'Π' : 'Δν'}</span>
                           <span className="text-[8px] font-mono text-zinc-300">{val}%</span>
                         </div>
                       ))}
@@ -5200,7 +5668,16 @@ export default function App(): React.ReactElement {
                                <Tooltip text="Upscale Neural 4K (4x)">
                                  <button onClick={() => handleQuickUpscale(res.image)} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all text-amber-400"><Zap size={16}/></button>
                                </Tooltip>
-                               <button onClick={() => setResultImage(res.image)} className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"><Zap size={16}/></button>
+                               <button 
+                                 onClick={() => {
+                                   setResultImage(res.image);
+                                   const histItem = history.find(h => h.image === res.image);
+                                   if (histItem?.provenance) setProvenanceData(histItem.provenance);
+                                 }} 
+                                 className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
+                               >
+                                 <Zap size={16}/>
+                               </button>
                             </div>
                           </div>
                         </div>
@@ -5229,7 +5706,16 @@ export default function App(): React.ReactElement {
                                <Tooltip text="Upscale Neural 4K (4x)">
                                  <button onClick={() => handleQuickUpscale(img)} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all text-amber-400"><Zap size={16}/></button>
                                </Tooltip>
-                               <button onClick={() => setResultImage(img)} className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"><Zap size={16}/></button>
+                               <button 
+                                 onClick={() => {
+                                   setResultImage(img);
+                                   const histItem = history.find(h => h.image === img);
+                                   if (histItem?.provenance) setProvenanceData(histItem.provenance);
+                                 }} 
+                                 className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
+                               >
+                                 <Zap size={16}/>
+                               </button>
                             </div>
                           </div>
                         </div>
@@ -5604,14 +6090,24 @@ export default function App(): React.ReactElement {
                       {ethicalProtocol && provenanceData && (
                         <div className="absolute bottom-10 right-10 flex flex-col items-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-y-3 group-hover:translate-y-0">
                           <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl max-w-[240px] animate-in slide-in-from-right-5 duration-500">
-                            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/5">
-                              <ShieldCheck size={14} className="text-emerald-400" />
-                              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Registro de Procedencia</span>
+                            <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-white/5">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheck size={14} className="text-emerald-400" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Registro de Procedencia</span>
+                              </div>
+                              <Tooltip text="Ver Pasaporte Neural Completo">
+                                <button 
+                                  onClick={() => setSelectedProvenance(provenanceData)}
+                                  className="text-zinc-500 hover:text-white transition-colors"
+                                >
+                                  <Info size={12} />
+                                </button>
+                              </Tooltip>
                             </div>
                             <div className="space-y-1.5">
                               <div className="flex justify-between text-[8px] uppercase tracking-tighter">
                                 <span className="text-zinc-500">ID SÍNTESIS</span>
-                                <span className="text-zinc-300 font-mono">{provenanceData.id}</span>
+                                <span className="text-zinc-300 font-mono italic">{provenanceData.generationId}</span>
                               </div>
                               <div className="flex justify-between text-[8px] uppercase tracking-tighter">
                                 <span className="text-zinc-500">TIMESTAMP</span>
@@ -5619,9 +6115,17 @@ export default function App(): React.ReactElement {
                               </div>
                               <div className="flex justify-between text-[8px] uppercase tracking-tighter">
                                 <span className="text-zinc-500">MOTOR NEURAL</span>
-                                <span className="text-zinc-300 font-mono">{provenanceData.model}</span>
+                                <span className="text-zinc-300 font-mono">{provenanceData.parameters.model}</span>
+                              </div>
+                              <div className="flex justify-between text-[8px] uppercase tracking-tighter">
+                                <span className="text-zinc-500">DNA (Λ-Π-Δν)</span>
+                                <span className="text-zinc-300 font-mono">{provenanceData.dna.lambda}-{provenanceData.dna.protocol}-{provenanceData.dna.entropy}</span>
                               </div>
                               <div className="mt-2 pt-2 border-t border-white/5">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <Fingerprint size={10} className="text-zinc-600" />
+                                  <span className="text-[6px] text-zinc-500 font-mono truncate">{provenanceData.securityHash}</span>
+                                </div>
                                 <p className="text-[7px] text-zinc-500 leading-tight italic">Este asset ha sido generado bajo el Protocolo de IA Responsable. Contiene metadatos de procedencia y marcas de agua digitales.</p>
                               </div>
                             </div>
@@ -5922,10 +6426,15 @@ export default function App(): React.ReactElement {
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-white/5">
+                <div className="pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Tooltip text="Inyectar el análisis técnico en el motor para generar una variante de mayor fidelidad">
-                    <button onClick={() => { setPrompt(analysisData.technical_prompt || ""); setMode('generate'); setShowAnalysis(false); }} className="w-full py-6 bg-white/5 hover:bg-white/10 border border-white/10 rounded-3xl text-[11px] font-black uppercase tracking-[0.5em] flex items-center justify-center gap-5 transition-all hover:scale-[1.01] active:scale-95 shadow-lg group">
-                      <Sparkles size={18} className="group-hover:text-amber-400 transition-colors"/> RECONSTRUIR VISIÓN NEURAL DESDE ANÁLISIS
+                    <button onClick={() => { setPrompt(analysisData.technical_prompt || ""); setMode('generate'); setShowAnalysis(false); }} className="w-full py-6 bg-white/5 hover:bg-white/10 border border-white/10 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] flex items-center justify-center gap-4 transition-all hover:scale-[1.01] active:scale-95 shadow-lg group">
+                      <Zap size={16} className="group-hover:text-amber-400 transition-colors"/> RECONSTRUIR VISIÓN
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Añadir palabras clave y contexto del análisis al prompt actual sin borrarlo">
+                    <button onClick={mergeAnalysisKeywords} className="w-full py-6 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-3xl text-[10px] font-black uppercase tracking-[0.3em] flex items-center justify-center gap-4 transition-all hover:scale-[1.01] active:scale-95 shadow-lg group text-indigo-400">
+                      <Sparkles size={16} className="group-hover:animate-pulse"/> FUSIONAR CONTEXTO
                     </button>
                   </Tooltip>
                 </div>
@@ -5938,6 +6447,76 @@ export default function App(): React.ReactElement {
       <AnimatePresence>
         {showPromptGuide && <PromptGuideOverlay />}
         {showBatchPanel && <BatchModeOverlay />}
+        {showAbout && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-3xl"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-zinc-950 border border-white/10 w-full max-w-2xl h-[80vh] rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-8 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-blue-900/20 to-transparent">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-2xl font-black text-white uppercase tracking-widest">Project Story</h2>
+                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.3em]">IA Studio Master Control v3.1</span>
+                </div>
+                <button 
+                  onClick={() => setShowAbout(false)}
+                  className="p-3 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
+                >
+                  <X size={24} className="text-white" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-10 prose prose-invert prose-zinc max-w-none scroll-smooth">
+                <div className="markdown-body text-zinc-300 leading-relaxed">
+                  <ReactMarkdown>{`# Syntergic Master Control: IA Studio A+B
+
+## Inspiration
+The desire to move beyond random seeds and LoRAs toward a system that behaves like a professional creative director—"evolución dirigida." We wanted a tool that doesn't just generate images, but *architects* them.
+
+## What it does
+Orchestrates multiple neural engines (Gemini 2.5/3.1) to create, edit, and evolve visual assets with pixel-perfect precision and luxury aesthetics. It features:
+- **Syntergic Refinement**: Iterative evolution of a visual concept.
+- **Neural Inpainting**: Surgical modification of specific regions.
+- **Worldbuilding DNA**: Parallel generation of coherent universe assets.
+
+## How we built it
+Built with **React**, **Tailwind CSS**, and the **Google GenAI SDK**. The backend uses an Express server to securely manage API interactions and proxy requests to the Gemini Neural Engine.
+
+## Challenges we ran into
+- **Permission Management**: Navigating the high-fidelity tiers (403 errors) required implementing a sophisticated fallback system.
+- **Coherence**: Maintaining visual DNA across multiple variations without losing creative entropy.
+
+## Accomplishments that we're proud of
+- Our **"403 Neural Bypass"**: If a high-tier model is unavailable, the system automatically redirects to a secondary engine without user friction.
+- The **"Geometry Engine"**: Dynamic aspect ratio control across all synthesis modes.
+
+## What we learned
+Prompt engineering is less about "magic words" and more about structural hierarchy and "visual DNA." True intelligence lies in the directed evolution of a concept, not just its initial generation.
+
+## Creado por
+Trabajé en el desarrollo integral del sistema Syntergic, desde la implementación del backend con Node para la gestión de APIs de Gemini, hasta el diseño de la interfaz visual de alta fidelidad. Fue un proceso de aprendizaje intenso en el que profundicé en la orquestación de modelos neuronales y el refinamiento de prompts para lograr una estética de lujo.
+
+---
+© 2026 IA Studio Neural Division`}</ReactMarkdown>
+                </div>
+              </div>
+              <div className="p-6 bg-zinc-900/50 border-t border-white/5 flex justify-center">
+                 <button 
+                   onClick={() => setShowAbout(false)}
+                   className="px-10 py-3 bg-white text-black text-[10px] font-black uppercase tracking-[0.2em] rounded-full hover:bg-zinc-200 transition-all hover:scale-105"
+                 >
+                   Cerrar Archivo
+                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <style>{`
