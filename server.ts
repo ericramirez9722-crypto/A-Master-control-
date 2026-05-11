@@ -1,5 +1,6 @@
 
 import express from "express";
+import "dotenv/config";
 import { createServer as createViteServer } from "vite";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";

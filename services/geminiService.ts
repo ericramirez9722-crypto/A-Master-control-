@@ -3,6 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_CORE_INSTRUCTIONS } from "../constants";
 import { retryManager } from "../lib/retryManager";
 
+// Force load env if not loaded
+if (typeof process !== "undefined" && !process.env.GEMINI_API_KEY) {
+  try {
+    // Dynamic import to avoid issues in browser
+    // But since this is ESM, we'll just rely on the server entry point
+  } catch (e) {}
+}
+
 /**
  * Robust JSON parsing for Neural Engine responses
  * Handles mixed text+JSON from LLMs
@@ -12,7 +20,7 @@ function safeJSONParse(text: string) {
     const match = text.match(/\{[\s\S]*\}/);
     return match ? JSON.parse(match[0]) : {};
   } catch {
-    return {};
+    return { error: "Parse failure", raw: text };
   }
 }
 
@@ -22,17 +30,41 @@ export class GeminiService {
   private intentCache = new Map<string, string>();
 
   constructor() {
-    if (typeof process !== "undefined" && !process.env.GEMINI_API_KEY) {
-      console.warn("[GEMINI_SERVICE] Critical: Missing GEMINI_API_KEY. Neural operations will fail.");
-    }
+    // Lazy initialization happens in getClient
   }
 
   private getClient(): GoogleGenAI {
     if (!this.aiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("CONFIG_ERROR: El servicio requiere una GEMINI_API_KEY configurada en las variables de entorno.");
+      // Platform standard is GEMINI_API_KEY, but we check common fallbacks
+      // In Vite, we also check import.meta.env
+      let apiKey = "";
+      
+      if (typeof process !== "undefined" && process.env) {
+        apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || "";
       }
+
+      // Browser fallback (if prefixed)
+      if (!apiKey && typeof (import.meta as any).env !== "undefined") {
+        apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
+      }
+
+      apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
+
+      // Critical detection of placeholder keys that might have been injected
+      const placeholderPatterns = [
+        "", "undefined", "null", "your_api_key_here", 
+        "replace_me", "placeholder", "ai_studio_api_key",
+        "key_here", "insert_key"
+      ];
+      
+      const isPlaceholder = placeholderPatterns.includes(apiKey.toLowerCase()) || apiKey.length < 10;
+
+      if (isPlaceholder) {
+        console.error("[GEMINI_SERVICE] ERROR: No valid API Key found in environment.");
+        throw new Error("CONFIG_ERROR: El servicio requiere una API Key válida de Google Gemini. Por favor, asegúrate de haberla configurado correctamente en los Ajustes del proyecto (Settings > Environment Variables).");
+      }
+
+      console.log(`[GEMINI_SERVICE] Initializing Neural Core with verified key [${apiKey.slice(0, 4)}...${apiKey.slice(-4)}]`);
       this.aiClient = new GoogleGenAI({ apiKey });
     }
     return this.aiClient;
@@ -46,11 +78,20 @@ export class GeminiService {
     if (!response || !response.candidates || response.candidates.length === 0) {
       throw new Error(`NEURAL_FAILURE: El motor no devolvió candidatos válidos para la operación [${operation}].`);
     }
-    const parts = response.candidates[0].content?.parts;
-    if (!parts || parts.length === 0) {
-      throw new Error(`NEURAL_EMPTY_PARTS: Respuesta vacía del Motor [${operation}].`);
+
+    const candidate = response.candidates[0];
+    
+    // Check for safety filters or other finish reasons
+    if (candidate.finishReason && !["STOP", "MAX_TOKENS"].includes(candidate.finishReason)) {
+      throw new Error(`NEURAL_LOCKED: El motor abortó la operación [${operation}] debido a: ${candidate.finishReason}. Esto suele ocurrir por filtros de seguridad o restricciones de contenido.`);
     }
-    return response.candidates[0].content.parts;
+
+    const parts = candidate.content?.parts;
+    if (!parts || parts.length === 0) {
+      // If no parts but no finish reason error, it might be a silent failure
+      throw new Error(`NEURAL_EMPTY_PARTS: Respuesta vacía del Motor [${operation}]. No se detectaron segmentos de datos.`);
+    }
+    return parts;
   }
 
   private async executeNeuralOperation<T>(
@@ -63,18 +104,22 @@ export class GeminiService {
       fn,
       maxRetries: 3,
       baseDelay: 2000,
-      timeoutMs: isPro ? 45000 : 30000,
+      timeoutMs: isPro ? 60000 : 30000, // Increased timeout for heavy visual tasks
       onRetry: this.onRetryCallback,
       onFail: (error) => {
         const errorStr = (error?.message || JSON.stringify(error)).toLowerCase();
+        
+        // Handle common API key errors from Google
         if (errorStr.includes("403") || errorStr.includes("permission_denied")) {
-          if (isPro) {
-            throw new Error("PRO_PERMISSION_DENIED: El modelo Neural de alta fidelidad (Gemini 3.1) requiere una API Key configurada manualmente con permisos de facturación activos. Intenta cambiar a un modelo estándar o configurando tu propia clave en Ajustes.");
-          }
-          throw new Error("PERMISSION_DENIED: El motor no tiene permisos para acceder a este modelo neural.");
+          throw new Error("PERMISSION_DENIED: La API Key no tiene permisos para acceder a este modelo neural o la cuota ha sido superada.");
         }
-        if (errorStr.includes("requested entity was not found") || errorStr.includes("key_not_found")) {
-          throw new Error("KEY_NOT_FOUND: La API Key seleccionada no es válida para este modelo.");
+        
+        if (errorStr.includes("400") || errorStr.includes("api key not valid") || errorStr.includes("invalid_argument")) {
+          throw new Error("API_KEY_INVALID: La clave de API de Gemini es inválida o ha sido revocada. Por favor, verifica tu clave en el menú de Ajustes del proyecto.");
+        }
+
+        if (errorStr.includes("404") || errorStr.includes("not found")) {
+          throw new Error("MODEL_NOT_FOUND: El modelo neural seleccionado no está disponible en tu región o con tu clave actual.");
         }
       }
     });
@@ -84,9 +129,16 @@ export class GeminiService {
     const callGenerate = async (model: string, isPro: boolean) => {
       return this.executeNeuralOperation(`generate-${prompt.slice(0, 10)}-${model}`, async (signal) => {
         const ai = this.getClient();
-        const finalPrompt = presetPrompt ? `${prompt}. Style constraints: ${presetPrompt}` : prompt;
-        const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
-        const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nUSER INTENT (GENERATE): ${finalPrompt}${negativeInstruction}`;
+        const finalPrompt = presetPrompt ? `${prompt}. Estilo: ${presetPrompt}` : prompt;
+        const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (EVITAR): ${negativePrompt}` : "";
+        
+        // Slightly more permissive prompt to avoid "freezing" the model
+        const fullContextPrompt = `GENERATE IMAGE: ${finalPrompt}${negativeInstruction}
+        
+        MANDATO TÉCNICO:
+        - Output ONLY the image binary data.
+        - NO TEXT, NO EXPLANATIONS.
+        - High fidelity, professional quality.`;
 
         const response = await ai.models.generateContent({
           model: model,
@@ -94,11 +146,12 @@ export class GeminiService {
             parts: [{ text: fullContextPrompt }],
           },
           config: {
+            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nIMPORTANTE: Eres un motor de generación visual. Tu salida debe ser ÚNICAMENTE el archivo de imagen. No respondas con texto.",
             imageConfig: {
               aspectRatio: aspectRatio as any,
-              imageSize: (model.includes('flash-image') && !model.includes('3.1')) ? undefined : "1K"
+              imageSize: highQuality ? "1K" : undefined
             },
-            tools: (useSearch && !model.includes("gemini-2.5")) ? [{
+            tools: useSearch ? [{
               googleSearch: {
                 searchTypes: {
                   webSearch: {},
@@ -110,33 +163,40 @@ export class GeminiService {
         });
 
         const parts = this.validateResponse(response, "generateImage");
-        let foundImage = false;
         let textFeedback = "";
 
         for (const part of parts) {
           if (part.inlineData) {
+            console.log("[GEMINI_SERVICE] Visual data detected and extracted.");
             return `data:image/png;base64,${part.inlineData.data}`;
+          }
+          // Handling potential fileData (URIs)
+          if ((part as any).fileData) {
+            console.warn("[GEMINI_SERVICE] Received unexpected fileData URI. Attempting to surface placeholder.");
+            return (part as any).fileData.fileUri;
           }
           if (part.text) {
             textFeedback += part.text + " ";
           }
         }
         
-        const errorMsg = textFeedback 
-          ? `NEURAL_REJECTION: El motor no generó una imagen. Respuesta técnica: ${textFeedback.trim()}`
-          : "NEURAL_MISSING_DATA: El motor devolvió una respuesta exitosa pero sin datos de imagen binarios.";
+        const errorMsg = textFeedback.trim()
+          ? `NEURAL_REJECTION: El motor no generó una imagen. Se recibió texto en su lugar: ${textFeedback.trim()}`
+          : "NEURAL_MISSING_DATA: El motor devolvió una respuesta exitosa pero sin datos de imagen binarios. Es posible que el modelo no tenga activada la capacidad visual en esta región.";
         
         throw new Error(errorMsg);
       }, isPro);
     };
 
     try {
-      const preferredModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-      return await callGenerate(preferredModel, highQuality);
+      return await callGenerate(highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image', highQuality);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED") && highQuality) {
-        console.warn("[GEMINI_SERVICE] High fidelity generate failed (403). Falling back to standard engine.");
-        return await callGenerate('gemini-2.5-flash-image', false);
+      const msg = err.message || "";
+      // If primary fails with permissions or missing data, try the alternative
+      if (msg.includes("PERMISSION_DENIED") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND")) {
+        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        console.warn(`[GEMINI_SERVICE] Primary model failed, attempting fallback to ${fallback}.`);
+        return await callGenerate(fallback, false);
       }
       throw err;
     }
@@ -149,7 +209,13 @@ export class GeminiService {
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
         const finalPrompt = presetPrompt ? `${prompt}. Visual Signature: ${presetPrompt}` : prompt;
         const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
-        const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nUSER INTENT (EDIT): ${finalPrompt}${negativeInstruction}`;
+        
+        const fullContextPrompt = `EDIT TASK: ${finalPrompt}${negativeInstruction}
+        
+        TECHNICAL MANDATE:
+        - Modify the provided image according to the instructions.
+        - DO NOT PROVIDE TEXT. Only output the edited image.
+        - Maintain consistency with the original content unless instructed otherwise.`;
 
         const response = await ai.models.generateContent({
           model: model,
@@ -160,9 +226,10 @@ export class GeminiService {
             ],
           },
           config: {
+            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image editor. Never reply with text. Always and only output the modified image binary.",
             imageConfig: {
-              imageSize: (model.includes('flash-image') && !model.includes('3.1')) ? undefined : "1K",
-              aspectRatio: aspectRatio as any
+              aspectRatio: aspectRatio as any,
+              imageSize: highQuality ? "1K" : undefined
             }
           }
         });
@@ -178,19 +245,18 @@ export class GeminiService {
           }
         }
         const errorMsg = textFeedback 
-          ? `NEURAL_REJECTION: El motor no pudo editar la imagen. Respuesta técnica: ${textFeedback.trim()}`
+          ? `NEURAL_REJECTION: El motor no pudo editar la imagen. Recibió texto: ${textFeedback.trim()}`
           : "Neural Engine failed to return edited data.";
         throw new Error(errorMsg);
       }, isPro);
     };
 
     try {
-      const preferredModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-      return await callEdit(preferredModel, highQuality);
+      return await callEdit(highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image', highQuality);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED") && highQuality) {
-        console.warn("[GEMINI_SERVICE] High fidelity edit failed (403). Falling back to standard engine.");
-        return await callEdit('gemini-2.5-flash-image', false);
+      if (err.message.includes("PERMISSION_DENIED") || err.message.includes("NOT_FOUND")) {
+        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        return await callEdit(fallback, false);
       }
       throw err;
     }
@@ -204,11 +270,15 @@ export class GeminiService {
       const finalPrompt = presetPrompt ? `${prompt}. Preset style: ${presetPrompt}` : prompt;
       
       const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
-      const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nTASK: INPAINTING.
+      const fullContextPrompt = `TASK: INPAINTING.
 The first image is the original scene. 
 The second image is a binary mask where white areas indicate the region to be regenerated.
 The third part is the user prompt describing what should appear in that masked region.
-USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
+USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}
+
+TECHNICAL MANDATE:
+- Generate ONLY the inpainted image. 
+- NO TEXT. NO PREAMBLE.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -220,8 +290,10 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
           ],
         },
         config: {
+          systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an inpainting specialist. Output ONLY the modified image data. No text.",
           imageConfig: {
-            aspectRatio: aspectRatio as any
+            aspectRatio: aspectRatio as any,
+            imageSize: "1K"
           }
         }
       });
@@ -248,7 +320,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       const ai = this.getClient();
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents: {
           parts: [
             { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
@@ -267,7 +339,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       const ai = this.getClient();
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents: {
           parts: [
             { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
@@ -313,7 +385,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       const ai = this.getClient();
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents: {
           parts: [
             { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
@@ -342,7 +414,7 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       const ai = this.getClient();
       const cleanBase64 = base64Image.split(',')[1] || base64Image;
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents: {
           parts: [
             { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
@@ -366,11 +438,14 @@ USER INTENT (INPAINT): ${finalPrompt}${negativeInstruction}`;
       const cleanStyle = styleImage.split(',')[1] || styleImage;
       
       const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
-      const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nTASK: STYLE TRANSFER.
+      const fullContextPrompt = `TASK: STYLE TRANSFER.
 Apply the artistic style, color palette, and aesthetic of the SECOND image to the content of the FIRST image.
-Maintain the structural integrity of the first image while adopting the visual signature of the second.
-STYLE INTENSITY: ${intensity}%. (0% means no change, 100% means full transformation).
-USER INTENT: ${prompt}${negativeInstruction}`;
+STYLE INTENSITY: ${intensity}%.
+USER INTENT: ${prompt}${negativeInstruction}
+
+TECHNICAL MANDATE:
+- Output ONLY the result image.
+- NO TEXTUAL FEEDBACK.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -382,8 +457,10 @@ USER INTENT: ${prompt}${negativeInstruction}`;
           ],
         },
         config: {
+          systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are a style transfer engine. Output ONLY the image binary. No text.",
           imageConfig: {
-            aspectRatio: aspectRatio as any
+            aspectRatio: aspectRatio as any,
+            imageSize: "1K"
           }
         }
       });
@@ -407,8 +484,8 @@ USER INTENT: ${prompt}${negativeInstruction}`;
 
   async upscaleImage(base64Image: string, factor: string, aspectRatio: string = "1:1"): Promise<string> {
     const sizeMap: Record<string, string> = {
-      "2x": "1K",
-      "4x": "2K",
+      "2x": "2K",
+      "4x": "4K",
       "8x": "4K"
     };
     const targetSize = sizeMap[factor] || "2K";
@@ -418,12 +495,16 @@ USER INTENT: ${prompt}${negativeInstruction}`;
         const ai = this.getClient();
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
         
-        const fullContextPrompt = `${SYSTEM_CORE_INSTRUCTIONS}\n\nTASK: AI UPSCALE.
+        const fullContextPrompt = `TASK: AI UPSCALE.
 Increase the resolution and detail of the provided image.
 TARGET RESOLUTION: ${targetSize}.
 Maintain absolute fidelity to the original composition, colors, and subject.
 Enhance micro-textures, sharpness, and clarity to professional studio standards.
-Remove any compression artifacts or noise.`;
+Remove any compression artifacts or noise.
+
+TECHNICAL MANDATE:
+- Result MUST be an image binary.
+- NO TEXTUAL OUTPUT.`;
 
         const response = await ai.models.generateContent({
           model,
@@ -434,9 +515,10 @@ Remove any compression artifacts or noise.`;
             ],
           },
           config: {
+            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image upscaler. Output ONLY the upscaled image binary. No text.",
             imageConfig: {
-              imageSize: (model.includes('flash-image') && !model.includes('3.1')) ? undefined : targetSize as any,
-              aspectRatio: aspectRatio as any
+              aspectRatio: aspectRatio as any,
+              imageSize: targetSize as any || "2K"
             }
           }
         });
@@ -459,10 +541,10 @@ Remove any compression artifacts or noise.`;
     };
 
     try {
-      return await callUpscale('gemini-3.1-flash-image-preview', true);
+      return await callUpscale(factor === "2x" ? 'gemini-3.1-flash-image-preview' : 'gemini-3.1-flash-image-preview', true);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED")) {
-        console.warn("[GEMINI_SERVICE] High fidelity upscale failed (403). Falling back to standard engine.");
+      const msg = err.message || "";
+      if (msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID") || msg.includes("MODEL_NOT_FOUND")) {
         return await callUpscale('gemini-2.5-flash-image', false);
       }
       throw err;
@@ -546,15 +628,25 @@ ${structuredPrompt}${negativeInstruction}
         const variationSeed = i > 0 ? `\nVariation ${i+1}: Focus on a different angle or lighting nuance while maintaining coherence.` : "";
         return this.executeNeuralOperation(`syntergic-${mode}-${i}-${model}`, async (signal) => {
           const ai = this.getClient();
+          const fullContextPrompt = `SYNTERGIC ACTIVATION [Mode: ${mode.toUpperCase()}]
+DNA PARAMETERS: Λ=${params.lambda} Π=${params.protocol} Δν=${params.entropy}
+CORE INTENT: ${structuredPrompt}${negativeInstruction}
+${variationSeed}
+
+TECHNICAL MANDATE:
+- Synthesize image based on DNA.
+- NO TEXT. NO CONVERSATION.`;
+
           const response = await ai.models.generateContent({
             model: model,
             contents: {
-              parts: [{ text: `${SYSTEM_CORE_INSTRUCTIONS}\n\n${syntergicContext}${variationSeed}` }],
+              parts: [{ text: fullContextPrompt }],
             },
             config: {
+              systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are the Syntergic Visual Engine. Output ONLY image data. No text.",
               imageConfig: {
                 aspectRatio: aspectRatio as any,
-                imageSize: (model.includes('flash-image') && !model.includes('3.1')) ? undefined : "1K"
+                imageSize: isPro ? "1K" : undefined
               },
             }
           });
@@ -581,9 +673,9 @@ ${structuredPrompt}${negativeInstruction}
     try {
       return await callSyntergic(modelName, highQuality);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED") && highQuality) {
-        console.warn("[GEMINI_SERVICE] Syntergic high fidelity failed (403). Falling back.");
-        return await callSyntergic('gemini-2.5-flash-image', false);
+      if (err.message.includes("PERMISSION_DENIED") || err.message.includes("NOT_FOUND")) {
+        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        return await callSyntergic(fallback, false);
       }
       throw err;
     }
@@ -652,7 +744,7 @@ ${structuredPrompt}${negativeInstruction}
       const ai = this.getClient();
       const cleanImg = image.split(',')[1] || image;
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents: {
           parts: [
             { inlineData: { data: cleanImg, mimeType: 'image/png' } },

@@ -67,6 +67,7 @@ import {
   Check,
   HelpCircle,
   Copyright,
+  FileText,
   Type as TypeIcon,
   Users,
   MessageSquare,
@@ -649,6 +650,60 @@ export default function App(): React.ReactElement {
     addLog(`SYNTERGIC AUTO-TUNE: Λ=${lambda} Π=${protocol} Δν=${entropy}`);
   }, [prompt]);
 
+  const neuralOptimizeDNA = async () => {
+    const target = gradedImage || resultImage || sourceImage;
+    if (!target) {
+      toast.error("Optimización Fallida", { 
+        description: "Se requiere un asset visual activo para calibrar el ADN neural.",
+        icon: <AlertTriangle size={14} />
+      });
+      return;
+    }
+
+    setIsEvaluating(true);
+    addLog(`NEURAL_SYSTEM: DISPATCHING DNA OPTIMIZATION PROTOCOL`);
+    
+    try {
+      const result = await gemini.evaluateAsset(target, prompt);
+      if (result && result.metrics) {
+        // Alignment: gemini metrics are lambda, protocol, entropy
+        const { lambda, protocol, entropy } = result.metrics;
+        
+        setSyntergicParams({ 
+          lambda: Math.round(lambda || syntergicParams.lambda), 
+          protocol: Math.round(protocol || syntergicParams.protocol), 
+          entropy: Math.round(entropy || syntergicParams.entropy) 
+        });
+        
+        setEvaluationData(result);
+        addLog(`NEURAL_OPTIMIZER: CALIBRATION SUCCESS. Λ=${lambda} Π=${protocol} Δν=${entropy}`);
+        toast.success("ADN Neural Recalibrado", {
+          description: "La arquitectura Syntergic ha sido optimizada para este asset específico.",
+          icon: <Scan size={14} className="text-blue-400" />
+        });
+      }
+    } catch (error: any) {
+      const errorMsg = error?.message || "";
+      let description = "El núcleo neural no pudo procesar la señal de optimización.";
+      
+      if (errorMsg.includes("CONFIG_ERROR")) {
+        description = "Falta la API Key de Gemini. Configúrala en Ajustes > Environment Variables.";
+      } else if (errorMsg.includes("API_KEY_INVALID")) {
+        description = "La API Key configurada no es válida. Por favor, verifícala en Ajustes.";
+      } else if (errorMsg.includes("PERMISSION_DENIED")) {
+        description = "La API Key no tiene permisos para este modelo o la cuota se agotó.";
+      }
+
+      addLog(`ERROR: NEURAL CALIBRATION FAILURE - ${errorMsg}`);
+      toast.error("Error de Calibración", { 
+        description,
+        icon: <WifiOff size={14} />
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
   const mapLambda = (v: number) => v > 80 ? "coherent lighting, stable concepts" : v < 40 ? "diffuse lighting, abstract concept drift" : "balanced lighting";
   const mapProtocol = (v: number) => v > 80 ? "structured composition, geometric precision" : v < 40 ? "organic composition, relaxed topology" : "standard studio structure";
   const mapEntropy = (v: number) => v > 60 ? "heavy film grain, dense micro-particles, divergent details" : v < 20 ? "clean textures, deterministic framing" : "subtle film grain, standard detail density";
@@ -692,7 +747,7 @@ export default function App(): React.ReactElement {
   const [variationCount, setVariationCount] = useState<1 | 2 | 4 | 8>(4);
   const [assetType, setAssetType] = useState<"icon" | "component" | "illustration">("icon");
   const [assetBackground, setAssetBackground] = useState<"isolated" | "gradient" | "scene">("isolated");
-  const [exportSettings, setExportSettings] = useState({ format: 'png', quality: 90 });
+  const [exportSettings, setExportSettings] = useState({ format: 'png', quality: 90, filename: 'ia-studio-asset' });
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [surfaceDetail, setSurfaceDetail] = useState(1.0);
   const [materialType, setMaterialType] = useState("Metal");
@@ -720,7 +775,7 @@ export default function App(): React.ReactElement {
   const [evaluationData, setEvaluationData] = useState<{
     score: number;
     feedback: string;
-    metrics: { lambda: number; pi: number; deltaNu: number };
+    metrics: { lambda: number; protocol: number; entropy: number };
   } | null>(null);
   const [batchQueue, setBatchQueue] = useState<BatchItem[]>([]);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
@@ -1205,8 +1260,12 @@ export default function App(): React.ReactElement {
 
   // Auto-apply LUT when intensity or data changes
   useEffect(() => {
+    setGradedImage(null);
+  }, [resultImage, sourceImage]);
+
+  useEffect(() => {
     const target = resultImage || sourceImage;
-    if ((lutData || grainIntensity > 0) && target && mode === "color-grading") {
+    if ((lutData || grainIntensity > 0) && target) {
       const timer = setTimeout(async () => {
         setIsApplyingLut(true);
         try {
@@ -1219,8 +1278,10 @@ export default function App(): React.ReactElement {
         }
       }, 150);
       return () => clearTimeout(timer);
+    } else if (!lutData && grainIntensity === 0) {
+      setGradedImage(null);
     }
-  }, [lutIntensity, lutData, grainIntensity, resultImage, sourceImage, mode]);
+  }, [lutIntensity, lutData, grainIntensity, resultImage, sourceImage]);
 
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1636,17 +1697,19 @@ export default function App(): React.ReactElement {
                   <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Reference Examples</span>
                   <div className="space-y-3">
                     {guide.examples.map((example: string, idx: number) => (
-                      <button 
-                        key={idx} 
-                        onClick={() => {
-                          setPrompt(example);
-                          setShowPromptGuide(false);
-                          addLog(`PROTOCOL: APPLIED EXAMPLE PROMPT`);
-                        }}
-                        className="w-full text-left p-4 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all group"
-                      >
-                        <p className="text-zinc-400 text-[10px] leading-relaxed group-hover:text-white transition-colors italic">"{example}"</p>
-                      </button>
+                        <Tooltip text="Inyectar este ejemplo neural en el núcleo de síntesis">
+                          <button 
+                            key={idx} 
+                            onClick={() => {
+                              setPrompt(example);
+                              setShowPromptGuide(false);
+                              addLog(`PROTOCOL: APPLIED EXAMPLE PROMPT`);
+                            }}
+                            className="w-full text-left p-4 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all group"
+                          >
+                            <p className="text-zinc-400 text-[10px] leading-relaxed group-hover:text-white transition-colors italic">"{example}"</p>
+                          </button>
+                        </Tooltip>
                     ))}
                   </div>
                 </div>
@@ -1783,18 +1846,20 @@ export default function App(): React.ReactElement {
                           </div>
                         )}
                       </div>
-                      <button 
-                        onClick={() => {
-                          setResultImage(item.image);
-                          if (item.provenance) setProvenanceData(item.provenance);
-                          setShowHistory(false);
-                        }}
-                        className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <div className="px-4 py-2 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[9px] transform translate-y-2 group-hover:translate-y-0 transition-transform">
-                          Cargar Asset
-                        </div>
-                      </button>
+                      <Tooltip text="Restablecer este asset neural a la interfaz de control principal para refinamiento adicional">
+                        <button 
+                          onClick={() => {
+                            setResultImage(item.image);
+                            if (item.provenance) setProvenanceData(item.provenance);
+                            setShowHistory(false);
+                          }}
+                          className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <div className="px-4 py-2 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[9px] transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                            Cargar Asset
+                          </div>
+                        </button>
+                      </Tooltip>
                     </div>
                     <div className="p-6 flex-1 flex flex-col justify-between min-w-0">
                       <div className="space-y-2">
@@ -2158,9 +2223,16 @@ export default function App(): React.ReactElement {
 
   const checkKeyStatus = async () => {
     try {
-      const selected = await (window as any).aistudio.hasSelectedApiKey();
-      setHasKey(selected);
-    } catch (err) { setHasKey(false); }
+      // Timeout guard: If the platform doesn't respond in 3 seconds, assume no key
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000));
+      const keyPromise = (window as any).aistudio.hasSelectedApiKey();
+      
+      const selected = await Promise.race([keyPromise, timeoutPromise]);
+      setHasKey(selected as boolean);
+    } catch (err) { 
+      console.warn("Key check failed or timed out, defaulting to false", err);
+      setHasKey(false); 
+    }
   };
 
   const handleModeChange = (newMode: Mode) => {
@@ -2289,11 +2361,21 @@ export default function App(): React.ReactElement {
         }
       }
 
-      if (size > 0 && currentData.length >= size * size * size * 3) {
+      // Check for normalization (standard .cube is 0..1, but some are 0..255)
+      let needsNormalization = false;
+      for (let i = 0; i < Math.min(currentData.length, 100); i++) {
+        if (currentData[i] > 1.1) {
+          needsNormalization = true;
+          break;
+        }
+      }
+
+      const finalValues = needsNormalization ? currentData.map(v => v / 255) : currentData;
+
+      if (size > 0 && finalValues.length >= size * size * size * 3) {
         setLutSize(size);
         const data: number[][][][] = [];
         
-        // .cube format: B changes fastest, then G, then R
         let dataIdx = 0;
         for (let r = 0; r < size; r++) {
           data[r] = [];
@@ -2301,16 +2383,16 @@ export default function App(): React.ReactElement {
             data[r][g] = [];
             for (let b = 0; b < size; b++) {
               data[r][g][b] = [
-                currentData[dataIdx],
-                currentData[dataIdx + 1],
-                currentData[dataIdx + 2]
+                finalValues[dataIdx],
+                finalValues[dataIdx + 1],
+                finalValues[dataIdx + 2]
               ];
               dataIdx += 3;
             }
           }
         }
         setLutData(data);
-        addLog(`LUT ENGINE: LOADED ${size}x${size}x${size} MATRIX`);
+        addLog(`LUT ENGINE: LOADED ${size}x${size}x${size} MATRIX (${needsNormalization ? "NORMALIZED 255" : "FLOAT 0-1"})`);
       } else {
         throw new Error("Invalid LUT dimensions or data");
       }
@@ -2320,7 +2402,7 @@ export default function App(): React.ReactElement {
     }
   };
 
-  const generatePresetLUT = (type: 'teal-orange' | 'vintage' | 'bw' | 'cyberpunk') => {
+  const generatePresetLUT = (type: 'teal-orange' | 'vintage' | 'bw' | 'cyberpunk' | 'matrix' | 'bleach' | 'noir' | 'warm') => {
     const size = 16;
     const data: number[][][][] = [];
     setLutSize(size);
@@ -2372,6 +2454,27 @@ export default function App(): React.ReactElement {
               gn = Math.min(1, gn * 1.2);
               rn = rn * 0.3;
             }
+          } else if (type === 'matrix') {
+            const luma = 0.2126 * rn + 0.7152 * gn + 0.0722 * bn;
+            rn = luma * 0.5;
+            gn = luma * 1.2;
+            bn = luma * 0.5;
+          } else if (type === 'bleach') {
+            const luma = 0.2126 * rn + 0.7152 * gn + 0.0722 * bn;
+            const amount = 0.5;
+            rn = (1 - amount) * rn + amount * luma;
+            gn = (1 - amount) * gn + amount * luma;
+            bn = (1 - amount) * bn + amount * luma;
+            rn = Math.pow(rn, 1.3);
+            gn = Math.pow(gn, 1.3);
+            bn = Math.pow(bn, 1.3);
+          } else if (type === 'noir') {
+            const luma = 0.2126 * rn + 0.7152 * gn + 0.0722 * bn;
+            rn = gn = bn = Math.pow(luma, 1.5);
+          } else if (type === 'warm') {
+            rn = Math.min(1, rn * 1.2);
+            gn = Math.min(1, gn * 1.05);
+            bn *= 0.9;
           }
 
           data[r][g][b] = [rn, gn, bn];
@@ -3398,7 +3501,7 @@ export default function App(): React.ReactElement {
             } else {
               const link = document.createElement('a');
               link.href = url;
-              link.download = `ia-studio-${Date.now()}.${ext}`;
+              link.download = `${exportSettings.filename}-${Date.now()}.${ext}`;
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);
@@ -3588,12 +3691,14 @@ export default function App(): React.ReactElement {
                         </div>
                         <span className="text-[9px] font-black uppercase tracking-widest text-zinc-300">{comment.userName}</span>
                       </div>
-                      <button 
-                        onClick={() => deleteComment(comment.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-600 hover:text-red-400 transition-all"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      <Tooltip text="Eliminar Comentario de la Sesión">
+                        <button 
+                          onClick={() => deleteComment(comment.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 text-zinc-600 hover:text-red-400 transition-all"
+                        >
+                          < Trash2 size={12} />
+                        </button>
+                      </Tooltip>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">{comment.text}</p>
                     <div className="flex items-center justify-between pt-2 border-t border-white/5">
@@ -4022,12 +4127,21 @@ export default function App(): React.ReactElement {
                 </div>
                 <div className="flex items-center gap-2">
                   {showSyntergicControls ? <ChevronUp size={14} className="text-zinc-500 group-hover:text-white" /> : <ChevronDown size={14} className="text-zinc-500 group-hover:text-white" />}
-                  <Tooltip text="Sugerir ADN basado en Prompt">
+                  <Tooltip text="Sugerir ADN basado en Prompt (Heurístico)">
                     <button 
                       onClick={(e) => { e.stopPropagation(); suggestDNA(); }} 
                       className="p-1 text-zinc-500 hover:text-amber-400 transition-colors"
                     >
                       <Wand2 size={14}/>
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Optimización Neural (Analiza Imagen Actual)">
+                    <button 
+                      disabled={isEvaluating}
+                      onClick={(e) => { e.stopPropagation(); neuralOptimizeDNA(); }} 
+                      className={`p-1 transition-all ${isEvaluating ? 'text-amber-500 animate-spin' : 'text-zinc-500 hover:text-blue-400'}`}
+                    >
+                      {isEvaluating ? <Loader2 size={14}/> : <Scan size={14}/>}
                     </button>
                   </Tooltip>
                   <Tooltip text="Restablecer ADN Predeterminado">
@@ -4303,15 +4417,19 @@ export default function App(): React.ReactElement {
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-2">
                           {[
-                            { id: 'teal-orange', name: 'Teal & Orange', color: 'bg-orange-500/20 text-orange-400' },
-                            { id: 'vintage', name: 'Vintage Film', color: 'bg-amber-500/20 text-amber-400' },
-                            { id: 'bw', name: 'B&W Contrast', color: 'bg-zinc-500/20 text-zinc-400' },
-                            { id: 'cyberpunk', name: 'Cyberpunk', color: 'bg-pink-500/20 text-pink-400' }
+                            { id: 'teal-orange', name: 'Teal & Orange', color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+                            { id: 'vintage', name: 'Vintage Film', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+                            { id: 'matrix', name: 'Matrix Digital', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+                            { id: 'bleach', name: 'Bleach Bypass', color: 'bg-zinc-500/10 text-zinc-100 border-white/20' },
+                            { id: 'noir', name: 'Cinema Noir', color: 'bg-black text-zinc-400 border-zinc-800' },
+                            { id: 'warm', name: 'Golden Hour', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+                            { id: 'cyberpunk', name: 'Cyberpunk', color: 'bg-pink-500/10 text-pink-400 border-pink-500/20' },
+                            { id: 'bw', name: 'B&W Contrast', color: 'bg-zinc-800 text-zinc-300 border-zinc-700' }
                           ].map(p => (
                             <button 
                               key={p.id}
                               onClick={() => generatePresetLUT(p.id as any)}
-                              className={`flex flex-col items-center justify-center p-3 rounded-2xl border border-white/5 hover:border-white/20 transition-all group ${p.color}`}
+                              className={`flex flex-col items-center justify-center p-3 rounded-2xl border transition-all hover:scale-[1.02] active:scale-95 group ${p.color}`}
                             >
                               <span className="text-[8px] font-black uppercase tracking-widest">{p.name}</span>
                             </button>
@@ -5054,12 +5172,14 @@ export default function App(): React.ReactElement {
                         <span className="text-[8px] font-black text-white uppercase tracking-widest">Mascara</span>
                       </div>
                     </div>
-                    <button 
-                      onClick={clearMask}
-                      className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                    >
-                      <X size={10} />
-                    </button>
+                      <Tooltip text="Eliminar Máscara de Inpainting">
+                        <button 
+                          onClick={clearMask}
+                          className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        >
+                          <X size={10} />
+                        </button>
+                      </Tooltip>
                   </div>
                 )}
                   <div className="relative group">
@@ -5656,7 +5776,11 @@ export default function App(): React.ReactElement {
                           <div className="aspect-square rounded-3xl overflow-hidden border border-white/5 bg-zinc-900 shadow-2xl relative group/img">
                             <img src={res.image} className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-110" referrerPolicy="no-referrer" loading="lazy" />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                               <button onClick={() => window.open(res.image, '_blank')} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all"><Maximize2 size={16}/></button>
+                               <Tooltip text="Ver Imagen en alta resolución (Nueva Pestaña)">
+                                 <button onClick={() => window.open(res.image, '_blank')} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all">
+                                   <Maximize2 size={16}/>
+                                 </button>
+                               </Tooltip>
                                <Tooltip text="Descargar Imagen (Alta Calidad)">
                                  <button 
                                    onClick={() => downloadImage(res.image, `ia-studio-${res.category}-${Date.now()}.png`)} 
@@ -5668,16 +5792,18 @@ export default function App(): React.ReactElement {
                                <Tooltip text="Upscale Neural 4K (4x)">
                                  <button onClick={() => handleQuickUpscale(res.image)} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all text-amber-400"><Zap size={16}/></button>
                                </Tooltip>
-                               <button 
-                                 onClick={() => {
-                                   setResultImage(res.image);
-                                   const histItem = history.find(h => h.image === res.image);
-                                   if (histItem?.provenance) setProvenanceData(histItem.provenance);
-                                 }} 
-                                 className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
-                               >
-                                 <Zap size={16}/>
-                               </button>
+                               <Tooltip text="Cargar como Asset Principal para edición profunda">
+                                 <button 
+                                   onClick={() => {
+                                     setResultImage(res.image);
+                                     const histItem = history.find(h => h.image === res.image);
+                                     if (histItem?.provenance) setProvenanceData(histItem.provenance);
+                                   }} 
+                                   className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
+                                 >
+                                   <Zap size={16}/>
+                                 </button>
+                               </Tooltip>
                             </div>
                           </div>
                         </div>
@@ -5694,7 +5820,11 @@ export default function App(): React.ReactElement {
                           <div className="aspect-square rounded-3xl overflow-hidden border border-white/5 bg-zinc-900 shadow-2xl relative group/img">
                             <img src={img} className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-110" referrerPolicy="no-referrer" />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                               <button onClick={() => window.open(img, '_blank')} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all"><Maximize2 size={16}/></button>
+                               <Tooltip text="Ver Imagen en alta resolución (Nueva Pestaña)">
+                                 <button onClick={() => window.open(img, '_blank')} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all">
+                                   <Maximize2 size={16}/>
+                                 </button>
+                               </Tooltip>
                                <Tooltip text="Descargar Imagen (Alta Calidad)">
                                  <button 
                                    onClick={() => downloadImage(img, `ia-studio-variation-${idx + 1}-${Date.now()}.png`)} 
@@ -5706,16 +5836,18 @@ export default function App(): React.ReactElement {
                                <Tooltip text="Upscale Neural 4K (4x)">
                                  <button onClick={() => handleQuickUpscale(img)} className="p-3 bg-white/10 backdrop-blur-md rounded-2xl hover:bg-white/20 transition-all text-amber-400"><Zap size={16}/></button>
                                </Tooltip>
-                               <button 
-                                 onClick={() => {
-                                   setResultImage(img);
-                                   const histItem = history.find(h => h.image === img);
-                                   if (histItem?.provenance) setProvenanceData(histItem.provenance);
-                                 }} 
-                                 className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
-                               >
-                                 <Zap size={16}/>
-                               </button>
+                               <Tooltip text="Cargar Variación como Asset Principal">
+                                 <button 
+                                   onClick={() => {
+                                     setResultImage(img);
+                                     const histItem = history.find(h => h.image === img);
+                                     if (histItem?.provenance) setProvenanceData(histItem.provenance);
+                                   }} 
+                                   className="p-3 bg-white text-black rounded-2xl hover:scale-105 transition-all"
+                                 >
+                                   <Zap size={16}/>
+                                 </button>
+                               </Tooltip>
                             </div>
                           </div>
                         </div>
@@ -5920,7 +6052,7 @@ export default function App(): React.ReactElement {
                             <MessageSquare size={22} fill={isCommentMode ? "currentColor" : "none"} />
                           </motion.button>
                         </Tooltip>
-                        <Tooltip text="Upscale Neural 2K (Aumentar resolución y detalle 4x)">
+                        <Tooltip text="Upscale Neural 4K (Aumentar resolución y detalle 4x)">
                           <motion.button 
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
@@ -5930,7 +6062,7 @@ export default function App(): React.ReactElement {
                             <Maximize size={22}/>
                           </motion.button>
                         </Tooltip>
-                        <Tooltip text="Upscale Neural 4K ULTRA (Aumentar resolución y detalle 8x)">
+                        <Tooltip text="Upscale Neural 4K ULTRA+ (Aumentar resolución y detalle 8x)">
                           <motion.button 
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
@@ -6005,6 +6137,18 @@ export default function App(): React.ReactElement {
                               >
                                 <div className="space-y-4">
                                   <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+                                    <FileText size={14} className="text-zinc-400" />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-300">Nombre del Archivo</span>
+                                  </div>
+                                  <input 
+                                    type="text"
+                                    value={exportSettings.filename}
+                                    onChange={e => setExportSettings({ ...exportSettings, filename: e.target.value.replace(/[^a-z0-9-_]/gi, '') })}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs font-mono text-white focus:border-indigo-500/50 outline-none transition-all"
+                                    placeholder="nombre-del-archivo"
+                                  />
+
+                                  <div className="flex items-center gap-2 pb-2 border-b border-white/5">
                                     <ImageIcon size={14} className="text-zinc-400" />
                                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-300">Formato de Exportación</span>
                                   </div>
@@ -6024,19 +6168,22 @@ export default function App(): React.ReactElement {
                                   <div className="space-y-2">
                                     <div className="flex justify-between items-center text-[9px] font-black text-zinc-500 uppercase">
                                       <span>Calidad de Compresión</span>
-                                      <span className="font-mono text-zinc-300">{exportSettings.quality}%</span>
+                                      <span className={`font-mono transition-colors ${exportSettings.format === 'png' ? 'text-zinc-600' : 'text-zinc-300'}`}>
+                                        {exportSettings.format === 'png' ? 'N/A' : `${exportSettings.quality}%`}
+                                      </span>
                                     </div>
                                     <input 
                                       type="range"
                                       min="10"
                                       max="100"
+                                      disabled={exportSettings.format === 'png'}
                                       value={exportSettings.quality}
                                       onChange={e => setExportSettings({ ...exportSettings, quality: +e.target.value })}
-                                      className="w-full h-1 bg-zinc-800 rounded-lg accent-white appearance-none cursor-pointer"
+                                      className={`w-full h-1 rounded-lg accent-white appearance-none cursor-pointer ${exportSettings.format === 'png' ? 'bg-zinc-900 opacity-50' : 'bg-zinc-800'}`}
                                     />
                                     <div className="flex justify-between text-[7px] text-zinc-600 font-bold uppercase">
-                                      <span>Ligero</span>
-                                      <span>Lossless</span>
+                                      <span>{exportSettings.format === 'png' ? 'Sin Efecto' : 'Ligero'}</span>
+                                      <span>{exportSettings.format === 'png' ? 'Sin Efecto' : 'Lossless'}</span>
                                     </div>
                                   </div>
 
@@ -6069,20 +6216,34 @@ export default function App(): React.ReactElement {
                                       * PNG es ideal para gráficos limpios. JPG/WebP reducen drásticamente el peso del archivo para uso web.
                                     </p>
                                   </div>
+
+                                  <button 
+                                    onClick={() => {
+                                      downloadBakedAsset();
+                                      setShowExportPanel(false);
+                                    }}
+                                    className="w-full py-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+                                  >
+                                    <Download size={14} />
+                                    Confirmar Exportación
+                                  </button>
                                 </div>
                               </motion.div>
                             )}
                           </AnimatePresence>
                         </div>
 
-                        <Tooltip text={`Descargar Asset Final (.${exportSettings.format.toUpperCase()})`}>
+                        <Tooltip text={`Descargar Asset Final (.${exportSettings.format.toUpperCase()} @ ${exportSettings.format === 'png' ? '100' : exportSettings.quality}%)`}>
                           <motion.button 
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={downloadBakedAsset} 
-                            className="p-5 bg-white text-black rounded-2xl hover:bg-zinc-200 transition-all shadow-2xl"
+                            className="p-5 bg-white text-black rounded-2xl hover:bg-zinc-200 transition-all shadow-2xl relative"
                           >
                             <Download size={22}/>
+                            <div className="absolute -top-1 -right-1 px-1.5 py-0.5 bg-black text-[7px] font-black text-white rounded-md border border-white/20">
+                              {exportSettings.format.toUpperCase()}
+                            </div>
                           </motion.button>
                         </Tooltip>
                       </div>
