@@ -482,7 +482,7 @@ TECHNICAL MANDATE:
     });
   }
 
-  async upscaleImage(base64Image: string, factor: string, aspectRatio: string = "1:1"): Promise<string> {
+  async upscaleImage(base64Image: string, factor: string, aspectRatio: string = "1:1", customPrompt?: string): Promise<string> {
     const sizeMap: Record<string, string> = {
       "2x": "2K",
       "4x": "4K",
@@ -495,16 +495,17 @@ TECHNICAL MANDATE:
         const ai = this.getClient();
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
         
-        const fullContextPrompt = `TASK: AI UPSCALE.
-Increase the resolution and detail of the provided image.
-TARGET RESOLUTION: ${targetSize}.
-Maintain absolute fidelity to the original composition, colors, and subject.
-Enhance micro-textures, sharpness, and clarity to professional studio standards.
-Remove any compression artifacts or noise.
+        const fullContextPrompt = `TASK: NEURAL UPGRADE & RESOLUTION ENHANCEMENT.
+Increase the resolution and fidelity of the provided image to ${targetSize}.
+${customPrompt ? `ADDITIONAL CONTEXT: ${customPrompt}` : ""}
+Maintain absolute fidelity to the original subject, colors, and composition.
+Enhance micro-textures, specular highlights, and surface detail to professional studio standards.
+Reconstruct high-frequency details (hair, skin pores, fabric weave, metal grit) that may be blurred.
+Remove any compression artifacts, noise, or blurring.
 
 TECHNICAL MANDATE:
-- Result MUST be an image binary.
-- NO TEXTUAL OUTPUT.`;
+- Output ONLY the high-resolution image binary.
+- NO TEXT. NO CONVERSATION.`;
 
         const response = await ai.models.generateContent({
           model,

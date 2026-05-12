@@ -86,6 +86,9 @@ import {
   ArrowDownLeft,
   ArrowDownRight,
   CheckCircle2,
+  Bold,
+  Italic,
+  Code
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
@@ -784,7 +787,49 @@ export default function App(): React.ReactElement {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [neuralResult, setNeuralResult] = useState<string | null>(null);
   const [neuralProgress, setNeuralProgress] = useState<any>(null);
+  const [glitchText, setGlitchText] = useState("");
   const lutInputRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const negativePromptRef = useRef<HTMLTextAreaElement>(null);
+
+  const applyFormatting = (syntax: 'bold' | 'italic' | 'code', target: 'prompt' | 'negative') => {
+    const ref = target === 'prompt' ? promptRef : negativePromptRef;
+    const value = target === 'prompt' ? prompt : negativePrompt;
+    const setValue = target === 'prompt' ? setPrompt : setNegativePrompt;
+
+    if (!ref.current) return;
+
+    const start = ref.current.selectionStart;
+    const end = ref.current.selectionEnd;
+    const selection = value.substring(start, end);
+
+    let formatted = selection;
+    switch (syntax) {
+      case 'bold':
+        formatted = `**${selection || 'text'}**`;
+        break;
+      case 'italic':
+        formatted = `_${selection || 'text'}_`;
+        break;
+      case 'code':
+        formatted = selection.includes('\n') ? `\`\`\`\n${selection || 'code'}\n\`\`\`` : `\`${selection || 'code'}\``;
+        break;
+    }
+
+    const newValue = value.substring(0, start) + formatted + value.substring(end);
+    setValue(newValue);
+
+    // Re-focus and set selection
+    setTimeout(() => {
+      if (ref.current) {
+        ref.current.focus();
+        const offset = syntax === 'bold' ? 2 : syntax === 'italic' ? 1 : selection.includes('\n') ? 4 : 1;
+        const endOffset = (selection.length || (syntax === 'code' ? 4 : (syntax === 'italic' ? 4 : 4)));
+        // Adjust for different syntax lengths if needed, but let's keep it simple
+        ref.current.setSelectionRange(start + offset, start + offset + (selection.length || (formatted.length - (offset * 2))));
+      }
+    }, 0);
+  };
 
   const runSAF = () => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
@@ -2702,9 +2747,15 @@ export default function App(): React.ReactElement {
     setLoadingStage(stages[0]);
     addLog(`INITIALIZING: ${stages[0]}`);
 
+    const glitchRef = setInterval(() => {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+";
+      const randomText = Array(8).fill(0).map(() => chars[Math.floor(Math.random() * chars.length)]).join('');
+      setGlitchText(randomText);
+    }, 50);
+
     progressIntervalRef.current = window.setInterval(() => {
       setProgress(prev => {
-        const next = prev + (Math.random() * 2.5);
+        const next = prev + (Math.random() * 1.5); // Slower, more deliberate
         const stageProgressThreshold = maxProgress / stages.length;
         const newIndex = Math.floor(next / stageProgressThreshold);
         
@@ -2714,14 +2765,18 @@ export default function App(): React.ReactElement {
           setLoadingStage(nextStage);
           addLog(`EXECUTING: ${nextStage}`);
           
-          if (Math.random() > 0.5) {
+          if (Math.random() > 0.4) {
             const techLogs = [
               "Optimizing latent space tensors...",
               "Harmonizing chromatic aberration nodes...",
               "Refining subsurface scattering parameters...",
               "Consolidating micro-texture fidelity...",
               "Applying G-Buffer optical correction...",
-              "Calibrating global illumination vectors..."
+              "Calibrating global illumination vectors...",
+              "Mapping high-frequency noise patterns...",
+              "Synchronizing neural pulse handshake...",
+              "Modulating entropy distribution...",
+              "Validating protocol coherence..."
             ];
             addLog(techLogs[Math.floor(Math.random() * techLogs.length)]);
           }
@@ -2729,6 +2784,8 @@ export default function App(): React.ReactElement {
         return next >= maxProgress ? maxProgress : next;
       });
     }, 120);
+
+    return () => clearInterval(glitchRef);
   };
 
   const addLog = (msg: string) => {
@@ -2759,7 +2816,7 @@ export default function App(): React.ReactElement {
         "Enhancing Sharpness",
         "Finalizing High-Res Asset"
       ]);
-      const res = await gemini.upscaleImage(img, factor, aspectRatio);
+      const res = await gemini.upscaleImage(img, factor, aspectRatio, prompt);
       setResultImage(res);
       const prov = generateProvenance({ 
         mode: "upscale", 
@@ -3272,7 +3329,7 @@ export default function App(): React.ReactElement {
           "Finalizing High-Res Asset"
         ]);
         const target = resultImage || processedSource;
-        const res = await gemini.upscaleImage(target!, upscaleFactor, aspectRatio);
+        const res = await gemini.upscaleImage(target!, upscaleFactor, aspectRatio, prompt);
         setResultImage(res);
         const prov = generateProvenance({ mode: `upscale-${upscaleFactor}`, prompt: "AI Upscale", params: currentParams, image: res });
         setProvenanceData(prov);
@@ -4370,12 +4427,22 @@ export default function App(): React.ReactElement {
 
                 <div id="lut-engine" className="glass rounded-[2rem] p-6 space-y-6 border border-white/5 shadow-2xl bg-gradient-to-br from-emerald-900/20 to-black/60 relative overflow-hidden">
                   {isApplyingLut && (
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex items-center justify-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <Loader2 className="animate-spin text-emerald-400" size={24} />
-                        <span className="text-[8px] font-black text-emerald-400 uppercase tracking-[0.3em]">Procesando LUT</span>
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 bg-black/60 backdrop-blur-md z-10 flex items-center justify-center border border-emerald-500/20"
+                    >
+                      <div className="flex flex-col items-center gap-4">
+                        <div className="relative">
+                          <Loader2 className="animate-spin text-emerald-400" size={32} strokeWidth={1} />
+                          <Activity size={12} className="absolute inset-0 m-auto text-white animate-pulse" />
+                        </div>
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.4em] animate-pulse">LUT Reconstruction</span>
+                          <span className="text-[6px] font-mono text-emerald-600 uppercase tracking-widest">{glitchText}</span>
+                        </div>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
                   
                   <div className="flex items-center justify-between text-[10px] font-black text-emerald-400 uppercase tracking-widest">
@@ -5182,10 +5249,16 @@ export default function App(): React.ReactElement {
                       </Tooltip>
                   </div>
                 )}
-                  <div className="relative group">
+                  <div className="relative group flex-1">
+                    <div className="absolute top-2 left-6 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => applyFormatting('bold', 'prompt')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Bold"><Bold size={12} /></button>
+                      <button onClick={() => applyFormatting('italic', 'prompt')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Italic"><Italic size={12} /></button>
+                      <button onClick={() => applyFormatting('code', 'prompt')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Code Block"><Code size={12} /></button>
+                    </div>
                     <Tooltip text="Describe la visión final: iluminación, materiales, composición y estética">
                       <textarea
                         id="prompt-area"
+                        ref={promptRef}
                         value={prompt}
                         onChange={(e) => {
                           if (e.target.value.length <= MAX_PROMPT_LENGTH) {
@@ -5193,7 +5266,12 @@ export default function App(): React.ReactElement {
                             if (promptSuggestions) setPromptSuggestions(null);
                           }
                         }}
-                        className={`w-full h-32 bg-[var(--bg-secondary)]/60 rounded-3xl p-6 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-[var(--text-secondary)] ${prompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-[var(--border-primary)] focus:border-[var(--border-primary)]"}`}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement;
+                          target.style.height = 'auto';
+                          target.style.height = `${Math.max(128, target.scrollHeight)}px`;
+                        }}
+                        className={`w-full min-h-[128px] h-32 bg-[var(--bg-secondary)]/60 rounded-3xl p-6 pt-10 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-[var(--text-secondary)] ${prompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-[var(--border-primary)] focus:border-[var(--border-primary)]"}`}
                         placeholder={mode === 'inpaint' ? "Describe el objeto o textura a sintetizar en el área marcada..." : "Especifique el núcleo creativo..."}
                       />
                     </Tooltip>
@@ -5217,17 +5295,28 @@ export default function App(): React.ReactElement {
                     </div>
                   </div>
 
-                <div className="relative">
+                <div className="relative group">
+                  <div className="absolute top-2 left-6 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => applyFormatting('bold', 'negative')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Bold"><Bold size={12} /></button>
+                    <button onClick={() => applyFormatting('italic', 'negative')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Italic"><Italic size={12} /></button>
+                    <button onClick={() => applyFormatting('code', 'negative')} className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors" title="Code Block"><Code size={12} /></button>
+                  </div>
                   <Tooltip text="Describe lo que NO quieres ver: objetos, estilos, colores o defectos">
                     <textarea
                       id="negative-prompt-area"
+                      ref={negativePromptRef}
                       value={negativePrompt}
                       onChange={(e) => {
                         if (e.target.value.length <= MAX_PROMPT_LENGTH) {
                           setNegativePrompt(e.target.value);
                         }
                       }}
-                      className={`w-full h-20 bg-red-500/5 rounded-3xl p-6 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-zinc-600 ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-red-500/10 focus:border-red-500/30"}`}
+                      onInput={(e) => {
+                        const target = e.target as HTMLTextAreaElement;
+                        target.style.height = 'auto';
+                        target.style.height = `${Math.max(80, target.scrollHeight)}px`;
+                      }}
+                      className={`w-full min-h-[80px] h-20 bg-red-500/5 rounded-3xl p-6 pt-10 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-zinc-600 ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-red-500/10 focus:border-red-500/30"}`}
                       placeholder="Elementos a evitar (Negative Prompt)..."
                     />
                   </Tooltip>
@@ -6307,128 +6396,202 @@ export default function App(): React.ReactElement {
               )}
 
               {loading && (
-                <div className="absolute inset-0 bg-black/98 flex flex-col items-center justify-center gap-8 z-50 px-8 py-10 overflow-hidden backdrop-blur-3xl animate-in fade-in duration-700">
-                  {/* Branding Background Element */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[20vw] font-black text-white/[0.02] select-none pointer-events-none tracking-tighter uppercase italic">
-                    IA Studio
+                <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center gap-8 z-50 px-8 py-10 overflow-hidden backdrop-blur-[50px] animate-in fade-in duration-700">
+                  {/* HUD Decorative Elements */}
+                  <div className="absolute inset-10 border border-white/5 pointer-events-none opacity-20">
+                    <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-white" />
+                    <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-white" />
+                    <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-white" />
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-white" />
+                    
+                    {/* Scanning Line */}
+                    <motion.div 
+                      className="absolute left-0 w-full h-[1px] bg-white/20 blur-sm"
+                      animate={{ top: ["0%", "100%", "0%"] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                    />
                   </div>
 
-                  <div className="flex flex-col lg:flex-row items-center justify-center gap-10 w-full max-w-5xl h-full relative z-10">
+                  <div className="absolute top-12 left-12 flex items-center gap-3 opacity-30 select-none">
+                     <Activity size={14} className="text-white animate-pulse" />
+                     <div className="flex flex-col">
+                        <span className="text-[8px] font-black tracking-[0.4em] text-white uppercase">Neural Uplink</span>
+                        <span className="text-[6px] font-mono text-zinc-500 uppercase tracking-widest">{glitchText}</span>
+                     </div>
+                  </div>
+
+                  <div className="absolute bottom-12 right-12 flex flex-col items-end gap-1 opacity-20 select-none">
+                     <span className="text-[8px] font-black tracking-widest text-white uppercase">Operational Status</span>
+                     <span className="text-[10px] font-mono text-zinc-400">0x{Math.floor(Date.now() / 1000).toString(16).toUpperCase()}</span>
+                  </div>
+
+                  {/* Branding Background Element */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[15vw] font-black text-white/[0.01] select-none pointer-events-none tracking-tighter uppercase italic leading-none text-center">
+                    IA STUDIO<br/>A+B PROTOCOL
+                  </div>
+
+                  <div className="flex flex-col lg:flex-row items-center justify-center gap-16 w-full max-w-6xl h-full relative z-10">
                     
-                    <div className="flex-1 flex flex-col items-center justify-center space-y-12">
-                      <div className="relative flex items-center justify-center">
+                    <div className="flex-1 flex flex-col items-center justify-center space-y-16">
+                      <div className="relative flex items-center justify-center scale-110 lg:scale-125">
                         {/* Sophisticated Glow */}
                         <div className="absolute inset-0 bg-white/5 blur-[150px] rounded-full animate-pulse scale-150" />
-                        <div className="absolute inset-0 bg-indigo-500/5 blur-[100px] rounded-full animate-pulse delay-700" />
+                        <div className="absolute inset-0 bg-indigo-500/5 blur-[120px] rounded-full animate-pulse delay-700" />
                         
                         {mode === 'vision' ? <Scan size={140} className="text-white animate-pulse" /> : 
                           mode === 'evolution' ? <Workflow size={140} className="text-white animate-spin-slow" /> :
                           mode === 'inpaint' ? <Brush size={140} className="text-white animate-pulse" /> :
                           <div className="relative flex items-center justify-center">
                             {/* Rotating Branding Ring */}
-                            <div className="absolute inset-0 -m-20 border border-white/5 rounded-full animate-spin-slow" />
+                            <motion.div 
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                              className="absolute inset-0 -m-20 border border-white/10 rounded-full"
+                            />
+                            <motion.div 
+                              animate={{ rotate: -360 }}
+                              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                              className="absolute inset-0 -m-28 border border-white/[0.02] rounded-full"
+                            />
+                            
                             <div className="absolute inset-0 -m-20 flex items-start justify-center">
-                              <div className="w-2 h-2 bg-white rounded-full shadow-[0_0_15px_white]" />
+                              <div className="w-1.5 h-1.5 bg-white rounded-full shadow-[0_0_20px_white]" />
                             </div>
 
-                            <Loader2 className="animate-spin text-white/5" size={320} strokeWidth={0.05} />
+                            <Loader2 className="animate-spin text-white/[0.03]" size={360} strokeWidth={0.03} />
                             
-                            <div className="absolute inset-0 m-auto flex items-center justify-center flex-col space-y-6">
-                              <div className="relative">
-                                <Activity size={64} className="text-white animate-pulse" />
-                                <div className="absolute -inset-4 border border-white/20 rounded-full animate-ping opacity-20" />
-                              </div>
+                            <div className="absolute inset-0 m-auto flex items-center justify-center flex-col space-y-8">
+                              <motion.div 
+                                animate={{ scale: [1, 1.1, 1] }} 
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="relative"
+                              >
+                                <Activity size={72} className="text-white" />
+                                <div className="absolute -inset-6 border border-white/20 rounded-full animate-ping opacity-10" />
+                              </motion.div>
                               <div className="flex flex-col items-center">
-                                <span className="text-[10px] font-black tracking-[0.6em] text-white animate-pulse uppercase mb-1">IA Studio</span>
-                                <span className="text-[8px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Neural Engine v3.1</span>
+                                <span className="text-[11px] font-black tracking-[0.8em] text-white animate-pulse uppercase mb-1">Synergy Engine</span>
+                                <span className="text-[9px] font-bold tracking-[0.5em] text-zinc-600 uppercase">Version 4.2.0-Alpha</span>
                               </div>
                             </div>
 
                             {/* Circular Progress */}
-                            <svg className="absolute inset-0 w-full h-full -rotate-90 scale-[1.15]" viewBox="0 0 100 100">
-                              <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
-                              <circle 
+                            <svg className="absolute inset-0 w-full h-full -rotate-90 scale-[1.12]" viewBox="0 0 100 100">
+                              <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="0.5" />
+                              <motion.circle 
                                 cx="50" 
                                 cy="50" 
                                 r="46" 
                                 fill="none" 
                                 stroke="white" 
-                                strokeWidth="1.5" 
+                                strokeWidth="2" 
                                 strokeDasharray="289" 
-                                strokeDashoffset={289 - (289 * progress) / 100} 
+                                animate={{ strokeDashoffset: 289 - (289 * progress) / 100 }}
+                                transition={{ type: "spring", stiffness: 30, damping: 10 }}
                                 strokeLinecap="round" 
-                                className="transition-all duration-700 ease-in-out shadow-[0_0_20px_white]" 
+                                className="shadow-[0_0_30px_white]" 
                               />
                             </svg>
                           </div>}
                       </div>
 
-                      <div className="w-full max-w-sm space-y-8">
+                      <div className="w-full max-w-md space-y-10">
                         <div className="space-y-6">
-                          <div className="flex justify-between items-end border-b border-white/10 pb-6">
-                            <div className="space-y-2 text-left">
+                          <div className="flex justify-between items-end border-b border-white/10 pb-8">
+                            <div className="space-y-3 text-left">
                               <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.6em]">Procesando Fase</p>
+                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_#10b981]" />
+                                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.8em]">Handshake Protocol</p>
                               </div>
-                              <p className="text-2xl font-black text-white uppercase tracking-[0.15em] animate-pulse drop-shadow-2xl">{loadingStage}</p>
+                              <div className="relative">
+                                <p className="text-3xl font-black text-white uppercase tracking-[0.2em] drop-shadow-2xl">{loadingStage}</p>
+                                <div className="absolute -right-12 top-0 text-[10px] font-mono text-white/20 hidden lg:block">{glitchText}</div>
+                              </div>
                             </div>
                             <div className="text-right">
-                              <p className="text-5xl font-black font-mono text-white leading-none tabular-nums tracking-tighter">{Math.round(progress)}%</p>
+                              <p className="text-6xl font-black font-mono text-white leading-none tabular-nums tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">{Math.round(progress)}%</p>
                             </div>
                           </div>
                           
-                          <div className="relative h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-gradient-to-r from-zinc-800 via-white to-zinc-800 bg-[length:200%_100%] animate-shimmer transition-all duration-700 ease-in-out shadow-[0_0_30px_rgba(255,255,255,0.6)]" 
-                              style={{ width: `${progress}%` }} 
+                          <div className="relative h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              className="h-full bg-white shadow-[0_0_40px_rgba(255,255,255,0.8)]" 
+                              animate={{ width: `${progress}%` }} 
+                              transition={{ type: "spring", stiffness: 50, damping: 20 }}
                             />
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer scale-y-50" />
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-white/5 border border-white/10 p-3 rounded-2xl flex flex-col gap-1">
-                            <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">Model Pipeline</span>
-                            <span className="text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                              <Cpu size={10} className="text-amber-400"/> {highQuality ? "Gemini 3 Pro" : "Gemini 2.5 Flash"}
+                        <div className="grid grid-cols-2 gap-6">
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className="bg-white/[0.03] border border-white/10 p-5 rounded-3xl flex flex-col gap-2 group hover:bg-white/[0.05] transition-colors"
+                          >
+                            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Processing Core</span>
+                            <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                              <Cpu size={12} className="text-emerald-400 group-hover:animate-spin-slow"/> {highQuality ? "Neural Engine Pro-X" : "Flash Engine v3"}
                             </span>
-                          </div>
-                          <div className="bg-white/5 border border-white/10 p-3 rounded-2xl flex flex-col gap-1">
-                            <span className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">Synthesis Mode</span>
-                            <span className="text-[9px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                              <Layers size={10} className="text-indigo-400"/> Latent Diffusion
+                          </motion.div>
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className="bg-white/[0.03] border border-white/10 p-5 rounded-3xl flex flex-col gap-2 group hover:bg-white/[0.05] transition-colors"
+                          >
+                            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Neural Topology</span>
+                            <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                              <Layers size={12} className="text-indigo-400"/> Syntergic Layer 7
                             </span>
-                          </div>
+                          </motion.div>
                         </div>
                       </div>
                     </div>
 
-                    <div id="provenance-logs" className="hidden lg:flex w-80 h-[400px] flex-col bg-black/40 border border-white/5 rounded-3xl overflow-hidden backdrop-blur-md shadow-2xl">
-                      <div className="p-4 border-b border-white/5 flex items-center justify-between bg-white/5">
-                        <div className="flex items-center gap-2">
-                          <Terminal size={12} className="text-zinc-400" />
-                          <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Neural Status Log</span>
+                    <div id="provenance-logs" className="hidden lg:flex w-96 h-[500px] flex-col bg-zinc-950/80 border border-white/10 rounded-[2.5rem] overflow-hidden backdrop-blur-3xl shadow-2xl scale-95 lg:scale-100">
+                      <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+                        <div className="flex items-center gap-3">
+                          <Terminal size={14} className="text-zinc-400" />
+                          <span className="text-[10px] font-black text-zinc-200 uppercase tracking-[0.2em]">Neural Uplink Feed</span>
                         </div>
-                        <div className="flex gap-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-green-500/50 animate-pulse" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-yellow-500/50" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-red-500/50" />
+                        <div className="flex gap-1.5 px-2 py-1 bg-black/40 rounded-full border border-white/5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/50 animate-pulse" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/30" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-amber-500/30" />
                         </div>
                       </div>
-                      <div ref={logContainerRef} className="flex-1 p-6 font-mono text-[9px] text-zinc-500 space-y-3 overflow-y-auto custom-scroll">
+                      <div ref={logContainerRef} className="flex-1 p-8 font-mono text-[10px] text-zinc-500 space-y-4 overflow-y-auto custom-scroll">
                         {statusLog.length === 0 && (
-                          <div className="flex items-center gap-2 animate-pulse">
-                            <ChevronRight size={10}/> Waiting for neural handshake...
+                          <div className="flex items-center gap-3 animate-pulse text-zinc-600">
+                            <ChevronRight size={12}/> Handshaking with Syntergic Nodes...
                           </div>
                         )}
-                        {statusLog.map((log, idx) => (
-                          <div key={idx} className="flex gap-3 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-300">
-                            <span className="text-zinc-700 whitespace-nowrap shrink-0">{log.split(' ')[0]}</span>
-                            <span className={log.includes('SUCCESS') ? 'text-green-400 font-bold' : log.includes('ERROR') ? 'text-red-400' : 'text-zinc-400'}>
-                              {log.split(' ').slice(1).join(' ')}
-                            </span>
-                          </div>
-                        ))}
+                        <AnimatePresence>
+                          {statusLog.map((log, idx) => (
+                            <motion.div 
+                              key={`${idx}-${log}`}
+                              initial={{ opacity: 0, x: -10, filter: "blur(4px)" }}
+                              animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                              className="flex gap-4 leading-relaxed group"
+                            >
+                              <span className="text-zinc-800 whitespace-nowrap shrink-0 group-hover:text-zinc-600 transition-colors">{log.split(' ')[0]}</span>
+                              <span className={`
+                                ${log.includes('SUCCESS') ? 'text-emerald-400 font-black' : 
+                                  log.includes('ERROR') ? 'text-red-400' : 
+                                  log.includes('EXECUTING') ? 'text-white font-bold' :
+                                  'text-zinc-500'}`}
+                              >
+                                {log.split(' ').slice(1).join(' ')}
+                              </span>
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                      <div className="p-4 border-t border-white/5 bg-white/[0.01] flex justify-between items-center px-8">
+                         <span className="text-[7px] text-zinc-600 font-mono tracking-widest uppercase">Encryption Active: AES-256</span>
+                         <span className="text-[7px] text-zinc-600 font-mono tracking-widest uppercase italic">0x{glitchText.slice(0,4)}</span>
                       </div>
                     </div>
                   </div>
