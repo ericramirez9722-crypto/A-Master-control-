@@ -107,6 +107,8 @@ async function startServer() {
 
     rooms[roomId].users[userId] = { id: userId, name: userName, color: userColor, mode: "generate" };
 
+    console.log(`[SERVER] Room ${roomId}: User ${userName} (${userId}) connected. Total: ${Object.keys(rooms[roomId].users).length}`);
+
     // Send initial state
     ws.send(JSON.stringify({
       type: "init",
@@ -114,7 +116,8 @@ async function startServer() {
         state: rooms[roomId].state,
         users: Object.values(rooms[roomId].users),
         comments: rooms[roomId].comments,
-        userId: userId
+        userId: userId,
+        roomId: roomId
       }
     }));
 

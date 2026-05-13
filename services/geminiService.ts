@@ -552,6 +552,58 @@ TECHNICAL MANDATE:
     }
   }
 
+  async applyNeuralWatermark(base64Image: string, watermarkParams: { text?: string; logo?: string; opacity: number; position: string }): Promise<string> {
+    return this.executeNeuralOperation(`watermark-${Date.now()}`, async (signal) => {
+      const ai = this.getClient();
+      const cleanImg = base64Image.split(',')[1] || base64Image;
+      
+      let prompt = `TASK: NEURAL WATERMARKING.
+Embed the following identification elements into the image for Intellectual Property protection.
+${watermarkParams.text ? `TEXT TO EMBED: "${watermarkParams.text}"` : ""}
+${watermarkParams.logo ? `A logo image is also provided to be used as a graphic watermark.` : ""}
+
+INTENSITY: ${watermarkParams.opacity * 100}%
+POSITIONING: ${watermarkParams.position}
+
+TECHNICAL MANDATE:
+- The watermark should be "neural", meaning it should be subtly blended into the image's high-frequency details, lighting, and textures.
+- It should appear as a professional studio-grade watermark or a subtle physical detailing (like an engraving or reflection) that is difficult to remove without destroying image fidelity.
+- It must be integrated naturally into the scene's color space and illumination.
+- Output ONLY the watermarked image binary data.
+- NO TEXT. NO CONVERSATION.`;
+
+      const contentsParts: any[] = [
+        { inlineData: { data: cleanImg, mimeType: 'image/png' } }
+      ];
+
+      if (watermarkParams.logo) {
+        const cleanLogo = watermarkParams.logo.split(',')[1] || watermarkParams.logo;
+        contentsParts.push({ inlineData: { data: cleanLogo, mimeType: 'image/png' } });
+      }
+
+      contentsParts.push({ text: prompt });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: { parts: contentsParts },
+        config: {
+          systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are a secure neural watermarking engine. Output ONLY the modified image binary data. No text.",
+          imageConfig: {
+            imageSize: "1K"
+          }
+        }
+      });
+
+      const parts = this.validateResponse(response, "applyNeuralWatermark");
+      for (const part of parts) {
+        if (part.inlineData) {
+          return `data:image/png;base64,${part.inlineData.data}`;
+        }
+      }
+      throw new Error("Neural Engine failed to return watermarked data.");
+    });
+  }
+
   async parseIntent(prompt: string): Promise<string> {
     if (this.intentCache.has(prompt)) return this.intentCache.get(prompt)!;
 

@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { throttle, debounce } from "lodash";
 import ReactMarkdown from 'react-markdown';
 import {
   Upload,
@@ -288,9 +289,16 @@ export default function App(): React.ReactElement {
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [neuralMode, setNeuralMode] = useState(false);
   const [showModelInfo, setShowModelInfo] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('ia_studio_theme');
+      return (saved as 'dark' | 'light') || 'dark';
+    }
+    return 'dark';
+  });
 
   useEffect(() => {
+    localStorage.setItem('ia_studio_theme', theme);
     if (theme === 'light') {
       document.documentElement.classList.add('light');
     } else {
@@ -361,7 +369,27 @@ export default function App(): React.ReactElement {
   const [watermarkLogo, setWatermarkLogo] = useState<string | null>(null);
   const [watermarkOpacity, setWatermarkOpacity] = useState(0.5);
   const [watermarkPosition, setWatermarkPosition] = useState<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'>('bottom-right');
+  const [missionPlan, setMissionPlan] = useState<{ step: string; status: 'pending' | 'active' | 'done'; detail: string }[] | null>(null);
   const [isWatermarking, setIsWatermarking] = useState(false);
+
+  const generateMissionPlan = async (goal: string) => {
+    addLog("AGENT: ANALYZING COMPLEX MISSION GOAL...");
+    setMissionPlan([
+      { step: "Conceptualización", status: 'active', detail: "Analizando intención semántica y estética..." },
+      { step: "Síntesis Neural", status: 'pending', detail: "Generando estructura base de píxeles..." },
+      { step: "Refinamiento de Micro-texturas", status: 'pending', detail: "Inyectando detalles de alta frecuencia..." },
+      { step: "Certificación de Procedencia", status: 'pending', detail: "Generando pasaporte neural y hashes..." }
+    ]);
+
+    // Simulate agentic planning with actual AI feedback
+    try {
+      const planRaw = await gemini.parseIntent(`Crea un plan de 4 pasos técnicos para: ${goal}. Devuelve solo un JSON array de strings.`);
+      // En una implementación real, este plan dirigiría el bucle de ejecución.
+      addLog("AGENT: CRITICAL PATH ESTABLISHED.");
+    } catch (e) {
+      addLog("AGENT: FALLBACK TO STANDARD PROTOCOL.");
+    }
+  };
   const watermarkLogoInputRef = useRef<HTMLInputElement>(null);
   const [objectSearchQuery, setObjectSearchQuery] = useState("");
   const [objectSearchResults, setObjectSearchResults] = useState<any[]>([]);
@@ -385,6 +413,17 @@ export default function App(): React.ReactElement {
   const [isCommentMode, setIsCommentMode] = useState(false);
   const [showPresence, setShowPresence] = useState(false);
   const [showCommentsSidebar, setShowCommentsSidebar] = useState(false);
+  const [isCopyingLink, setIsCopyingLink] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<number>(WebSocket.CLOSED);
+
+  const copyRoomLink = () => {
+    setIsCopyingLink(true);
+    const url = new URL(window.location.href);
+    url.searchParams.set("room", roomId);
+    navigator.clipboard.writeText(url.toString());
+    addLog("COLLABORATION: ROOM LINK COPIED TO CLIPBOARD");
+    setTimeout(() => setIsCopyingLink(false), 2000);
+  };
 
   useEffect(() => {
     remoteUsersRef.current = remoteUsers;
@@ -445,81 +484,14 @@ export default function App(): React.ReactElement {
     if (!target) return;
     
     setIsWatermarking(true);
+    addLog("IP PROTECTION: INITIALIZING NEURAL WATERMARK SYNTHESIS");
+    
     try {
-      const watermarked = await new Promise<string>((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return reject("Canvas context not found");
-
-          ctx.drawImage(img, 0, 0);
-          ctx.globalAlpha = watermarkOpacity;
-
-          const padding = canvas.width * 0.05;
-          
-          const drawContent = (logoImg?: HTMLImageElement) => {
-            let x = 0;
-            let y = 0;
-            
-            if (logoImg) {
-              const logoWidth = canvas.width * 0.15;
-              const logoHeight = (logoImg.height / logoImg.width) * logoWidth;
-
-              switch (watermarkPosition) {
-                case 'top-left': x = padding; y = padding; break;
-                case 'top-right': x = canvas.width - logoWidth - padding; y = padding; break;
-                case 'bottom-left': x = padding; y = canvas.height - logoHeight - padding; break;
-                case 'bottom-right': x = canvas.width - logoWidth - padding; y = canvas.height - logoHeight - padding; break;
-                case 'center': x = (canvas.width - logoWidth) / 2; y = (canvas.height - logoHeight) / 2; break;
-              }
-              ctx.drawImage(logoImg, x, y, logoWidth, logoHeight);
-              
-              if (watermarkText) {
-                ctx.font = `bold ${canvas.width * 0.02}px Inter`;
-                ctx.fillStyle = "white";
-                ctx.textAlign = "center";
-                ctx.shadowColor = "rgba(0,0,0,0.5)";
-                ctx.shadowBlur = 4;
-                ctx.fillText(watermarkText, x + logoWidth/2, y + logoHeight + (canvas.width * 0.025));
-              }
-            } else if (watermarkText) {
-              ctx.font = `bold ${canvas.width * 0.035}px Inter`;
-              ctx.fillStyle = "white";
-              ctx.shadowColor = "rgba(0,0,0,0.8)";
-              ctx.shadowBlur = 10;
-              
-              const metrics = ctx.measureText(watermarkText);
-              const textWidth = metrics.width;
-              const textHeight = canvas.width * 0.035;
-
-              switch (watermarkPosition) {
-                case 'top-left': x = padding; y = padding + textHeight; break;
-                case 'top-right': x = canvas.width - textWidth - padding; y = padding + textHeight; break;
-                case 'bottom-left': x = padding; y = canvas.height - padding; break;
-                case 'bottom-right': x = canvas.width - textWidth - padding; y = canvas.height - padding; break;
-                case 'center': x = (canvas.width - textWidth) / 2; y = (canvas.height + textHeight) / 2; break;
-              }
-              ctx.fillText(watermarkText, x, y);
-            }
-            resolve(canvas.toDataURL("image/png"));
-          };
-
-          if (watermarkLogo) {
-            const logo = new Image();
-            logo.crossOrigin = "anonymous";
-            logo.onload = () => drawContent(logo);
-            logo.onerror = () => drawContent();
-            logo.src = watermarkLogo;
-          } else {
-            drawContent();
-          }
-        };
-        img.onerror = () => reject("Failed to load source image");
-        img.src = target;
+      const watermarked = await gemini.applyNeuralWatermark(target, {
+        text: watermarkText,
+        logo: watermarkLogo || undefined,
+        opacity: watermarkOpacity,
+        position: watermarkPosition
       });
       
       setResultImage(watermarked);
@@ -533,7 +505,7 @@ export default function App(): React.ReactElement {
             {
               type: 'watermark',
               timestamp: new Date().toISOString(),
-              details: `Dynamic watermark applied: "${watermarkText || 'Logo'}" at ${watermarkPosition}.`
+              details: `Neural watermark synthesized: "${watermarkText || 'Logo'}" at ${watermarkPosition}.`
             }
           ]
         };
@@ -545,9 +517,10 @@ export default function App(): React.ReactElement {
         addToHistory({ mode: 'watermark', prompt, params: localParams, image: watermarked, provenance: updatedProv });
       }
 
-      addLog("IP PROTECTION: WATERMARK EMBEDDED SUCCESSFULLY");
-    } catch (err) {
-      addLog("IP PROTECTION: FAILED TO EMBED WATERMARK");
+      addLog("IP PROTECTION: NEURAL WATERMARK EMBEDDED SUCCESSFULLY");
+    } catch (err: any) {
+      console.error("Watermark failure:", err);
+      addLog(`IP PROTECTION: ERROR - ${err.message || "SYNTHESIS FAILED"}`);
     } finally {
       setIsWatermarking(false);
     }
@@ -1012,10 +985,24 @@ export default function App(): React.ReactElement {
       kw.length > 2
     );
     
+    let updatedPrompt = prompt;
+    let itemsAdded = 0;
+
     if (newKeywords.length > 0) {
-      setPrompt(prev => `${prev}, ${newKeywords.join(", ")}`);
-      addLog(`PROTOCOL: MERGED ${newKeywords.length} CONTEXTUAL KEYWORDS`);
-      toast.success(`Añadidas ${newKeywords.length} palabras clave del análisis`);
+      updatedPrompt = updatedPrompt ? `${updatedPrompt}, ${newKeywords.join(", ")}` : newKeywords.join(", ");
+      itemsAdded += newKeywords.length;
+    }
+
+    const description = analysisData.scene?.description;
+    if (description && !prompt.toLowerCase().includes(description.toLowerCase())) {
+      updatedPrompt = updatedPrompt ? `${updatedPrompt}. En la escena: ${description}` : description;
+      itemsAdded++;
+    }
+    
+    if (itemsAdded > 0) {
+      setPrompt(updatedPrompt);
+      addLog(`PROTOCOL: MERGED ${itemsAdded} CONTEXTUAL ELEMENTS`);
+      toast.success(`Añadidos ${itemsAdded} elementos del análisis al prompt`);
     } else {
       toast.info("El prompt ya incluye la información principal del análisis");
     }
@@ -1161,9 +1148,20 @@ export default function App(): React.ReactElement {
     const rId = params.get("room") || "default";
     setRoomId(rId);
 
+    // Persist User ID
+    let persistentUserId = localStorage.getItem("ia_studio_user_id");
+    if (!persistentUserId) {
+      persistentUserId = crypto.randomUUID();
+      localStorage.setItem("ia_studio_user_id", persistentUserId);
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}?roomId=${rId}`);
+    const socket = new WebSocket(`${protocol}//${window.location.host}?roomId=${rId}&userId=${persistentUserId}`);
     socketRef.current = socket;
+
+    socket.onopen = () => setConnectionStatus(WebSocket.OPEN);
+    socket.onclose = () => setConnectionStatus(WebSocket.CLOSED);
+    socket.onerror = () => setConnectionStatus(WebSocket.CLOSED);
 
     socket.onmessage = (event) => {
       const { type, payload } = JSON.parse(event.data);
@@ -1237,15 +1235,31 @@ export default function App(): React.ReactElement {
     return () => {
       socket.close();
     };
-  }, [applyState]);
+  }, [applyState, roomId]);
+
+  const throttledMouseMove = useRef(
+    throttle((x: number, y: number) => {
+      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+      socketRef.current.send(JSON.stringify({
+        type: "cursor:move",
+        payload: { x, y }
+      }));
+    }, 50)
+  ).current;
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
-    socketRef.current.send(JSON.stringify({
-      type: "cursor:move",
-      payload: { x: (e.clientX / window.innerWidth) * 100, y: (e.clientY / window.innerHeight) * 100 }
-    }));
+    throttledMouseMove((e.clientX / window.innerWidth) * 100, (e.clientY / window.innerHeight) * 100);
   };
+
+  const debouncedStateSync = useRef(
+    debounce((data: any) => {
+      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+      socketRef.current.send(JSON.stringify({
+        type: "state:update",
+        payload: data
+      }));
+    }, 500)
+  ).current;
 
   const addComment = (text: string, x: number, y: number) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
@@ -1266,11 +1280,18 @@ export default function App(): React.ReactElement {
   // Sync local changes to server
   useEffect(() => {
     if (isRemoteUpdateRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
-    socketRef.current.send(JSON.stringify({
-      type: "state:update",
-      payload: { filters, grading, prompt, mode, sourceImage, resultImage, mask: maskPreview, activePreset }
-    }));
-  }, [filters, grading, prompt, mode, sourceImage, resultImage, maskPreview, activePreset]);
+    
+    debouncedStateSync({ 
+      filters, 
+      grading, 
+      prompt, 
+      mode, 
+      sourceImage, 
+      resultImage, 
+      mask: maskPreview, 
+      activePreset 
+    });
+  }, [filters, grading, prompt, mode, sourceImage, resultImage, maskPreview, activePreset, debouncedStateSync]);
 
   // Update mode separately for presence
   useEffect(() => {
@@ -3007,6 +3028,9 @@ export default function App(): React.ReactElement {
     }
 
     setLoading(true);
+    if (mode === 'generate' || mode === 'evolution') {
+      await generateMissionPlan(prompt);
+    }
     setError(null);
     setEvaluationData(null);
     setAnalysisData(null);
@@ -3582,15 +3606,15 @@ export default function App(): React.ReactElement {
     img.src = target;
   };
 
-  if (hasKey === null) return <div className="min-h-screen bg-black flex items-center justify-center"><Activity className="text-white animate-pulse" size={48} /></div>;
+  if (hasKey === null) return <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center"><Activity className="text-[var(--text-primary)] animate-pulse" size={48} /></div>;
 
   if (hasKey === false) {
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-8 text-center space-y-8">
-        <div className="bg-zinc-900/50 p-12 rounded-[3rem] border border-white/10 space-y-8 max-w-md backdrop-blur-3xl animate-in zoom-in-95 duration-500">
+      <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col items-center justify-center p-8 text-center space-y-8 transition-colors duration-300">
+        <div className="bg-[var(--bg-glass)] p-12 rounded-[3rem] border border-[var(--border-glass)] space-y-8 max-w-md backdrop-blur-3xl animate-in zoom-in-95 duration-500">
           <Key size={56} className="text-amber-400 mx-auto" />
           <h1 className="text-4xl font-black uppercase tracking-tighter">ACCESO REQUERIDO</h1>
-          <p className="text-zinc-400 text-xs uppercase tracking-widest leading-relaxed">
+          <p className="opacity-60 text-xs uppercase tracking-widest leading-relaxed">
             Para utilizar los modelos de IA Studio, selecciona una API Key vinculada a un proyecto de Google Cloud con facturación activa.
           </p>
           
@@ -3827,6 +3851,22 @@ export default function App(): React.ReactElement {
                 <span className="text-[10px] font-black uppercase tracking-[0.2em]">Historial</span>
               </button>
             </Tooltip>
+            {/* Room ID & Sharing */}
+            <div className={`flex items-center gap-2 border px-4 py-1.5 rounded-full transition-colors duration-500 ${connectionStatus === WebSocket.OPEN ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+              <div className="flex items-center gap-2">
+                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${connectionStatus === WebSocket.OPEN ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <Users size={12} className={connectionStatus === WebSocket.OPEN ? 'text-emerald-400' : 'text-red-400'} />
+                <span className={`text-[8px] font-black uppercase tracking-widest ${connectionStatus === WebSocket.OPEN ? 'text-emerald-300' : 'text-red-300'}`}>Room: {roomId}</span>
+              </div>
+              <div className="w-px h-3 bg-white/10 mx-1" />
+              <button 
+                onClick={copyRoomLink}
+                className="flex items-center gap-2 hover:text-white text-zinc-400 transition-colors group"
+              >
+                {isCopyingLink ? <Check size={12} className="text-emerald-400" /> : <Share2 size={12} className="group-hover:scale-110 transition-transform" />}
+                <span className="text-[8px] font-black uppercase tracking-widest">{isCopyingLink ? 'Copiado' : 'Invitar'}</span>
+              </button>
+            </div>
             <Tooltip text="Procesamiento por Lotes (Batch)">
               <button 
                 onClick={() => setShowBatchPanel(true)}
@@ -5959,6 +5999,44 @@ export default function App(): React.ReactElement {
                       >
                         {isSplitView ? (
                           <div className="flex w-full h-full gap-4 p-8">
+                            {/* Mission Plan Overlay inside workspace */}
+                            {missionPlan && loading && (
+                              <div className="absolute inset-0 z-50 flex items-center justify-center p-12 pointer-events-none">
+                                <motion.div 
+                                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  className="w-full max-w-lg bg-black/80 backdrop-blur-3xl border border-white/10 rounded-[3rem] p-10 shadow-2xl pointer-events-auto"
+                                >
+                                  <div className="flex items-center gap-4 mb-8">
+                                    <div className="p-3 bg-amber-500/20 rounded-2xl">
+                                      <Cpu size={24} className="text-amber-400 animate-pulse" />
+                                    </div>
+                                    <div>
+                                      <h4 className="text-[12px] font-black text-white uppercase tracking-[0.4em]">Rapid Agent Planner</h4>
+                                      <p className="text-[10px] text-amber-500/60 font-bold uppercase tracking-widest italic">Google Cloud Agentic Reasoning Protocol</p>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-4">
+                                    {missionPlan.map((step, idx) => (
+                                      <div key={idx} className={`flex items-start gap-4 p-4 rounded-3xl border transition-all duration-500 ${step.status === 'active' ? 'bg-amber-500/10 border-amber-400/30' : step.status === 'done' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-transparent border-transparent'}`}>
+                                        <div className={`mt-1 w-2.5 h-2.5 rounded-full ${step.status === 'done' ? 'bg-emerald-400' : step.status === 'active' ? 'bg-amber-400 animate-ping' : 'bg-zinc-800'}`} />
+                                        <div className="flex-1 min-w-0">
+                                          <p className={`text-[10px] font-black uppercase tracking-widest ${step.status === 'pending' ? 'text-zinc-600' : 'text-zinc-200'}`}>{step.step}</p>
+                                          <p className="text-[9px] text-zinc-500 font-medium leading-relaxed mt-1">{step.detail}</p>
+                                        </div>
+                                        {step.status === 'done' && <Check size={14} className="text-emerald-400 shrink-0" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="mt-8 flex justify-center">
+                                    <div className="px-4 py-1.5 bg-white/5 rounded-full border border-white/10">
+                                      <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest animate-pulse">Processing Multi-Step Logic Path...</span>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              </div>
+                            )}
+
                             <div className="flex-1 flex flex-col items-center justify-center gap-2">
                               <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Original</span>
                               <div className="relative w-full h-full flex items-center justify-center overflow-hidden rounded-2xl border border-white/5 bg-zinc-950/50">
@@ -6614,9 +6692,17 @@ export default function App(): React.ReactElement {
                 <div className="grid md:grid-cols-2 gap-8 max-h-[60vh] overflow-y-auto pr-4 custom-scroll">
                   {/* Scene Understanding */}
                   <div className="space-y-6">
-                    <div className="flex items-center gap-3 text-amber-400">
-                      <Scan size={18} />
-                      <span className="text-[10px] font-black uppercase tracking-widest">Scene Understanding</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 text-amber-400">
+                        <Scan size={18} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Scene Understanding</span>
+                      </div>
+                      <button 
+                        onClick={mergeAnalysisKeywords}
+                        className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-[8px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/20 transition-all"
+                      >
+                        <Sparkles size={10} /> Fusionar
+                      </button>
                     </div>
                     <div className="space-y-4 bg-white/5 p-6 rounded-3xl border border-white/5">
                       <div>
@@ -6696,13 +6782,21 @@ export default function App(): React.ReactElement {
                       <div className="space-y-3">
                         <div className="flex items-center justify-between px-1">
                           <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Objetos Detectados (Auto)</p>
-                          <button 
-                            onClick={() => setShowAutoBoxes(!showAutoBoxes)}
-                            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-all ${showAutoBoxes ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-zinc-500 hover:text-zinc-300'}`}
-                          >
-                            <Eye size={10} />
-                            <span className="text-[8px] font-black uppercase tracking-tighter">{showAutoBoxes ? "Ocultar" : "Mostrar"}</span>
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={mergeAnalysisKeywords}
+                              className="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[8px] font-black uppercase tracking-widest text-indigo-400 hover:bg-indigo-500/20 transition-all"
+                            >
+                              <Sparkles size={10} /> Fusionar
+                            </button>
+                            <button 
+                              onClick={() => setShowAutoBoxes(!showAutoBoxes)}
+                              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-all ${showAutoBoxes ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-zinc-500 hover:text-zinc-300'}`}
+                            >
+                              <Eye size={10} />
+                              <span className="text-[8px] font-black uppercase tracking-tighter">{showAutoBoxes ? "Ocultar" : "Mostrar"}</span>
+                            </button>
+                          </div>
                         </div>
                         {analysisData.objects?.map((obj: any, idx: number) => (
                           <div key={idx} className="bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col gap-1">

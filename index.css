@@ -6,18 +6,22 @@
 
 :root {
   --bg-primary: #000000;
-  --bg-secondary: #18181b;
+  --bg-secondary: #0a0a0a;
+  --bg-glass: rgba(24, 24, 27, 0.5);
   --text-primary: #f4f4f5;
   --text-secondary: #a1a1aa;
   --border-primary: rgba(255, 255, 255, 0.1);
+  --border-glass: rgba(255, 255, 255, 0.05);
 }
 
 :root.light {
   --bg-primary: #f4f4f5;
   --bg-secondary: #ffffff;
-  --text-primary: #18181b;
+  --bg-glass: rgba(255, 255, 255, 0.7);
+  --text-primary: #0a0a0a;
   --text-secondary: #52525b;
   --border-primary: rgba(0, 0, 0, 0.1);
+  --border-glass: rgba(0, 0, 0, 0.05);
 }
 
 body {
