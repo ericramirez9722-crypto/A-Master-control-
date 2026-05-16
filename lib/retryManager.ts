@@ -103,7 +103,10 @@ export async function retryManager<T>({
         onRetry?.(attempt, error);
 
         // ⚡ Exponential backoff + jitter (prevents thundering herd)
-        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 500;
+        // If it's a quota error, we use a much more aggressive backoff
+        const isQuota = (error?.message || "").toLowerCase().includes("quota") || error?.status === 429 || (error?.message || "").toLowerCase().includes("429");
+        const delay = (isQuota ? baseDelay * 5 : baseDelay) * Math.pow(2, attempt) + Math.random() * 500;
+        
         console.warn(`[RETRY_MANAGER] Retrying ${operationId} in ${Math.round(delay)}ms... (Attempt ${attempt}/${maxRetries})`);
 
         await sleep(delay);

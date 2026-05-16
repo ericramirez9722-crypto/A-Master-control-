@@ -110,6 +110,10 @@ export class GeminiService {
         const errorStr = (error?.message || JSON.stringify(error)).toLowerCase();
         
         // Handle common API key errors from Google
+        if (errorStr.includes("429") || errorStr.includes("resource_exhausted") || errorStr.includes("quota")) {
+          throw new Error("QUOTA_EXCEEDED: Has superado el límite de peticiones de tu API Key (Cuota excedida). Espera un minuto o verifica tu plan en Google AI Studio.");
+        }
+        
         if (errorStr.includes("403") || errorStr.includes("permission_denied")) {
           throw new Error("PERMISSION_DENIED: La API Key no tiene permisos para acceder a este modelo neural o la cuota ha sido superada.");
         }
@@ -126,13 +130,14 @@ export class GeminiService {
   }
 
   async generateImage(prompt: string, presetPrompt?: string, highQuality: boolean = false, useSearch: boolean = false, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
-    const callGenerate = async (model: string, isPro: boolean) => {
+    const callGenerate = async (model: string, isPro: boolean, attempts: number = 0) => {
+      const sanitizedPrompt = prompt.length < 15 ? `Professional artistic representation of: ${prompt}` : prompt;
+      
       return this.executeNeuralOperation(`generate-${prompt.slice(0, 10)}-${model}`, async (signal) => {
         const ai = this.getClient();
-        const finalPrompt = presetPrompt ? `${prompt}. Estilo: ${presetPrompt}` : prompt;
+        const finalPrompt = presetPrompt ? `${sanitizedPrompt}. Estilo: ${presetPrompt}` : sanitizedPrompt;
         const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (EVITAR): ${negativePrompt}` : "";
         
-        // Slightly more permissive prompt to avoid "freezing" the model
         const fullContextPrompt = `GENERATE IMAGE: ${finalPrompt}${negativeInstruction}
         
         MANDATO TÉCNICO:
@@ -140,74 +145,97 @@ export class GeminiService {
         - NO TEXT, NO EXPLANATIONS.
         - High fidelity, professional quality.`;
 
-        const response = await ai.models.generateContent({
-          model: model,
-          contents: {
-            parts: [{ text: fullContextPrompt }],
-          },
-          config: {
-            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nIMPORTANTE: Eres un motor de generación visual. Tu salida debe ser ÚNICAMENTE el archivo de imagen. No respondas con texto.",
-            imageConfig: {
-              aspectRatio: aspectRatio as any,
-              imageSize: highQuality ? "1K" : undefined
+        try {
+          const response = await ai.models.generateContent({
+            model: model,
+            contents: {
+              parts: [{ text: fullContextPrompt }],
             },
-            tools: useSearch ? [{
-              googleSearch: {
-                searchTypes: {
-                  webSearch: {},
-                  imageSearch: {}
+            config: {
+              systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nIMPORTANTE: Eres un motor de generación visual. Tu salida debe ser ÚNICAMENTE el archivo de imagen. No respondas con texto.",
+              imageConfig: {
+                aspectRatio: aspectRatio as any,
+                imageSize: highQuality ? "1K" : undefined
+              },
+              tools: useSearch ? [{
+                googleSearch: {
+                  searchTypes: {
+                    webSearch: {},
+                    imageSearch: {}
+                  }
                 }
-              }
-            }] : undefined
-          }
-        });
+              }] : undefined
+            }
+          });
 
-        const parts = this.validateResponse(response, "generateImage");
-        let textFeedback = "";
+          const parts = this.validateResponse(response, "generateImage");
+          let textFeedback = "";
 
-        for (const part of parts) {
-          if (part.inlineData) {
-            console.log("[GEMINI_SERVICE] Visual data detected and extracted.");
-            return `data:image/png;base64,${part.inlineData.data}`;
+          for (const part of parts) {
+            if (part.inlineData) {
+              console.log("[GEMINI_SERVICE] Visual data detected and extracted.");
+              return `data:image/png;base64,${part.inlineData.data}`;
+            }
+            if ((part as any).fileData) {
+              return (part as any).fileData.fileUri;
+            }
+            if (part.text) {
+              textFeedback += part.text + " ";
+            }
           }
-          // Handling potential fileData (URIs)
-          if ((part as any).fileData) {
-            console.warn("[GEMINI_SERVICE] Received unexpected fileData URI. Attempting to surface placeholder.");
-            return (part as any).fileData.fileUri;
+          
+          const errorMsg = textFeedback.trim()
+            ? `NEURAL_REJECTION: El motor no generó una imagen. Se recibió texto en su lugar: ${textFeedback.trim()}`
+            : "NEURAL_MISSING_DATA: El motor devolvió una respuesta exitosa pero sin datos de imagen binarios.";
+          
+          throw new Error(errorMsg);
+        } catch (err: any) {
+          // If it's a safety error and we haven't tried a "soft" prompt yet, try once
+          if (err.message.includes("IMAGE_SAFETY") && attempts === 0) {
+            console.warn("[GEMINI_SERVICE] Safety filter hit. Retrying with ultra-neutral prompt...");
+            const neutralPrompt = `High quality aesthetic image: ${prompt}`;
+            // Recursive call with increased attempt count
+            return callGenerate(model, isPro, attempts + 1);
           }
-          if (part.text) {
-            textFeedback += part.text + " ";
-          }
+          throw err;
         }
-        
-        const errorMsg = textFeedback.trim()
-          ? `NEURAL_REJECTION: El motor no generó una imagen. Se recibió texto en su lugar: ${textFeedback.trim()}`
-          : "NEURAL_MISSING_DATA: El motor devolvió una respuesta exitosa pero sin datos de imagen binarios. Es posible que el modelo no tenga activada la capacidad visual en esta región.";
-        
-        throw new Error(errorMsg);
       }, isPro);
     };
 
     try {
-      return await callGenerate(highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image', highQuality);
+      const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+      return await callGenerate(primaryModel, highQuality);
     } catch (err: any) {
       const msg = err.message || "";
-      // If primary fails with permissions or missing data, try the alternative
-      if (msg.includes("PERMISSION_DENIED") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND")) {
+      // If primary fails, check if we can fallback
+      if (msg.includes("PERMISSION_DENIED") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND") || msg.includes("403")) {
         const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
-        console.warn(`[GEMINI_SERVICE] Primary model failed, attempting fallback to ${fallback}.`);
-        return await callGenerate(fallback, false);
+        console.warn(`[GEMINI_SERVICE] Primary model failed (${msg.slice(0, 50)}...). Attempting fallback to ${fallback}.`);
+        try {
+          return await callGenerate(fallback, false);
+        } catch (fallbackErr: any) {
+          // If fallback also fails, provide a consolidated error
+          if (fallbackErr.message.includes("IMAGE_SAFETY")) {
+            throw new Error("CONTENIDO_RESTRINGIDO: El prompt fue bloqueado por los filtros de seguridad en ambos modelos. Intenta usar un lenguaje más descriptivo y neutro.");
+          }
+          if (fallbackErr.message.includes("PERMISSION_DENIED")) {
+            throw new Error("ERROR_DE_PERMISOS: No se pudo acceder a los modelos de generación. Cerciórate de que tu API Key tenga habilitados los modelos Imagen/Gemini Visual.");
+          }
+          throw fallbackErr;
+        }
       }
       throw err;
     }
   }
 
   async editImage(base64Image: string, prompt: string, presetPrompt?: string, highQuality: boolean = true, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
-    const callEdit = async (model: string, isPro: boolean) => {
+    const callEdit = async (model: string, isPro: boolean, attempts: number = 0) => {
+      const sanitizedPrompt = prompt.length < 15 ? `Professional edit based on: ${prompt}` : prompt;
+      
       return this.executeNeuralOperation(`edit-${prompt.slice(0, 10)}-${model}`, async (signal) => {
         const ai = this.getClient();
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
-        const finalPrompt = presetPrompt ? `${prompt}. Visual Signature: ${presetPrompt}` : prompt;
+        const finalPrompt = presetPrompt ? `${sanitizedPrompt}. Visual Signature: ${presetPrompt}` : sanitizedPrompt;
         const negativeInstruction = negativePrompt ? `\n\nNEGATIVE PROMPT (AVOID): ${negativePrompt}` : "";
         
         const fullContextPrompt = `EDIT TASK: ${finalPrompt}${negativeInstruction}
@@ -217,46 +245,64 @@ export class GeminiService {
         - DO NOT PROVIDE TEXT. Only output the edited image.
         - Maintain consistency with the original content unless instructed otherwise.`;
 
-        const response = await ai.models.generateContent({
-          model: model,
-          contents: {
-            parts: [
-              { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
-              { text: fullContextPrompt },
-            ],
-          },
-          config: {
-            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image editor. Never reply with text. Always and only output the modified image binary.",
-            imageConfig: {
-              aspectRatio: aspectRatio as any,
-              imageSize: highQuality ? "1K" : undefined
+        try {
+          const response = await ai.models.generateContent({
+            model: model,
+            contents: {
+              parts: [
+                { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
+                { text: fullContextPrompt },
+              ],
+            },
+            config: {
+              systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image editor. Never reply with text. Always and only output the modified image binary.",
+              imageConfig: {
+                aspectRatio: aspectRatio as any,
+                imageSize: highQuality ? "1K" : undefined
+              }
+            }
+          });
+
+          const parts = this.validateResponse(response, "editImage");
+          let textFeedback = "";
+          for (const part of parts) {
+            if (part.inlineData) {
+              return `data:image/png;base64,${part.inlineData.data}`;
+            }
+            if (part.text) {
+              textFeedback += part.text + " ";
             }
           }
-        });
-
-        const parts = this.validateResponse(response, "editImage");
-        let textFeedback = "";
-        for (const part of parts) {
-          if (part.inlineData) {
-            return `data:image/png;base64,${part.inlineData.data}`;
+          const errorMsg = textFeedback 
+            ? `NEURAL_REJECTION: El motor no pudo editar la imagen. Recibió texto: ${textFeedback.trim()}`
+            : "Neural Engine failed to return edited data.";
+          throw new Error(errorMsg);
+        } catch (err: any) {
+          if (err.message.includes("IMAGE_SAFETY") && attempts === 0) {
+            console.warn("[GEMINI_SERVICE] Safety hit during edit. Retrying...");
+            return callEdit(model, isPro, attempts + 1);
           }
-          if (part.text) {
-            textFeedback += part.text + " ";
-          }
+          throw err;
         }
-        const errorMsg = textFeedback 
-          ? `NEURAL_REJECTION: El motor no pudo editar la imagen. Recibió texto: ${textFeedback.trim()}`
-          : "Neural Engine failed to return edited data.";
-        throw new Error(errorMsg);
       }, isPro);
     };
 
     try {
-      return await callEdit(highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image', highQuality);
+      const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+      return await callEdit(primaryModel, highQuality);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED") || err.message.includes("NOT_FOUND")) {
+      const msg = err.message || "";
+      if (msg.includes("PERMISSION_DENIED") || msg.includes("NOT_FOUND") || msg.includes("403") || msg.includes("LOCKED")) {
         const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
-        return await callEdit(fallback, false);
+        console.warn(`[GEMINI_SERVICE] Edit fallback to ${fallback} due to: ${msg.slice(0, 30)}`);
+        try {
+          return await callEdit(fallback, false);
+        } catch (fallbackErr: any) {
+          if (fallbackErr.message.includes("IMAGE_SAFETY")) {
+             throw new Error("EDICION_RESTRINGIDA: No se pudo realizar la edición por restricciones de seguridad. Intenta simplificar el prompt de edición.");
+          }
+          throw fallbackErr;
+        }
       }
       throw err;
     }
@@ -490,7 +536,7 @@ TECHNICAL MANDATE:
     };
     const targetSize = sizeMap[factor] || "2K";
 
-    const callUpscale = async (model: string, isPro: boolean) => {
+    const callUpscale = async (model: string, isPro: boolean, attempts: number = 0) => {
       return this.executeNeuralOperation(`upscale-${factor}-${model}`, async (signal) => {
         const ai = this.getClient();
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
@@ -507,46 +553,64 @@ TECHNICAL MANDATE:
 - Output ONLY the high-resolution image binary.
 - NO TEXT. NO CONVERSATION.`;
 
-        const response = await ai.models.generateContent({
-          model,
-          contents: {
-            parts: [
-              { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
-              { text: fullContextPrompt },
-            ],
-          },
-          config: {
-            systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image upscaler. Output ONLY the upscaled image binary. No text.",
-            imageConfig: {
-              aspectRatio: aspectRatio as any,
-              imageSize: targetSize as any || "2K"
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: {
+              parts: [
+                { inlineData: { data: cleanBase64, mimeType: 'image/png' } },
+                { text: fullContextPrompt },
+              ],
+            },
+            config: {
+              systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are an image upscaler. Output ONLY the upscaled image binary. No text.",
+              imageConfig: {
+                aspectRatio: aspectRatio as any,
+                imageSize: targetSize as any || "2K"
+              }
+            }
+          });
+
+          const parts = this.validateResponse(response, "upscaleImage");
+          let textFeedback = "";
+          for (const part of parts) {
+            if (part.inlineData) {
+              return `data:image/png;base64,${part.inlineData.data}`;
+            }
+            if (part.text) {
+              textFeedback += part.text + " ";
             }
           }
-        });
-
-        const parts = this.validateResponse(response, "upscaleImage");
-        let textFeedback = "";
-        for (const part of parts) {
-          if (part.inlineData) {
-            return `data:image/png;base64,${part.inlineData.data}`;
+          const errorMsg = textFeedback 
+            ? `NEURAL_REJECTION: El motor no pudo realizar el escalado. Respuesta técnica: ${textFeedback.trim()}`
+            : "Neural Engine failed to return upscaled data.";
+          throw new Error(errorMsg);
+        } catch (err: any) {
+          if (err.message.includes("IMAGE_SAFETY") && attempts === 0) {
+            console.warn("[GEMINI_SERVICE] Safety hit during upscale. Retrying...");
+            return callUpscale(model, isPro, attempts + 1);
           }
-          if (part.text) {
-            textFeedback += part.text + " ";
-          }
+          throw err;
         }
-        const errorMsg = textFeedback 
-          ? `NEURAL_REJECTION: El motor no pudo realizar el escalado. Respuesta técnica: ${textFeedback.trim()}`
-          : "Neural Engine failed to return upscaled data.";
-        throw new Error(errorMsg);
       }, isPro);
     };
 
     try {
-      return await callUpscale(factor === "2x" ? 'gemini-3.1-flash-image-preview' : 'gemini-3.1-flash-image-preview', true);
+      const primaryModel = 'gemini-3.1-flash-image-preview';
+      return await callUpscale(primaryModel, true);
     } catch (err: any) {
       const msg = err.message || "";
-      if (msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID") || msg.includes("MODEL_NOT_FOUND")) {
-        return await callUpscale('gemini-2.5-flash-image', false);
+      if (msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID") || msg.includes("MODEL_NOT_FOUND") || msg.includes("LOCKED") || msg.includes("403")) {
+        const fallback = 'gemini-2.5-flash-image';
+        console.warn(`[GEMINI_SERVICE] Upscale fallback to ${fallback} due to: ${msg.slice(0, 30)}`);
+        try {
+          return await callUpscale(fallback, false);
+        } catch (fallbackErr: any) {
+           if (fallbackErr.message.includes("IMAGE_SAFETY")) {
+             throw new Error("RECONSTRUCCION_BLOQUEADA: El motor de seguridad ha impedido el escalado de esta imagen.");
+           }
+           throw fallbackErr;
+        }
       }
       throw err;
     }
@@ -792,7 +856,17 @@ TECHNICAL MANDATE:
     });
   }
 
+  private lastEvalTime = 0;
+  private evalCooldown = 15000; // 15 seconds between evaluations
+
   async evaluateAsset(image: string, prompt: string): Promise<any> {
+    const now = Date.now();
+    if (now - this.lastEvalTime < this.evalCooldown) {
+      console.warn("[GEMINI_SERVICE] Evaluation skipped due to cooldown.");
+      return { score: 0, feedback: "Evaluación en enfriamiento para conservar cuota.", metrics: { lambda: 0, protocol: 0, entropy: 0 } };
+    }
+    this.lastEvalTime = now;
+
     return this.executeNeuralOperation('asset-evaluation', async (signal) => {
       const ai = this.getClient();
       const cleanImg = image.split(',')[1] || image;

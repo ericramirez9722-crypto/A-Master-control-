@@ -108,3 +108,31 @@ body {
 :root.light [data-sonner-toast] [data-description] {
   color: #52525b !important;
 }
+
+.tutorial-highlight {
+  position: relative;
+  z-index: 250 !important;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.5), 0 0 60px rgba(255, 255, 255, 0.3) !important;
+  pointer-events: none;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+:root.light .tutorial-highlight {
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.2), 0 0 40px rgba(0, 0, 0, 0.1) !important;
+}
+
+@keyframes tutorial-pulse {
+  0% { box-shadow: 0 0 0 0px rgba(255, 255, 255, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0px rgba(255, 255, 255, 0); }
+}
+
+.tutorial-highlight::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid white;
+  animation: tutorial-pulse 2s infinite;
+  pointer-events: none;
+}

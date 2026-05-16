@@ -35,15 +35,12 @@ La inspiración surgió de una limitación clara: las herramientas actuales depe
 
 Syntergic Master Control es un **sistema de generación de imágenes auto-mejorable**. Ejecuta ciclos inteligentes de refinamiento continuo hasta alinear perfectamente intención del usuario y resultado final.
 
-El sistema se rige por el marco **Syntergic (C-ROI)**:
+### 🧩 **Capabilities Matrix**
 
-- $C^\circ$ **(Coherencia)** — Calidad estructural y narrativa  
-- $\Delta\nu$ **(Variación)** — Exploración creativa controlada  
-- $\Lambda$ **(Alineación)** — Convergencia entre intención y resultado  
-
-El **A+B Engine** incluye:  
-- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Luxury Amplifier</span>** → Estética editorial de alto nivel  
-- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Mutation Emergence</span>** → Variaciones creativas coherentes
+- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Rapid Agent Planner</span>** → Sistema de razonamiento agéntico que establece un "Critical Path" para misiones de generación complejas.
+- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Visual Fusion Protocol</span>** → Permite fusionar el análisis semántico de una imagen (objetos y escena) directamente en el prompt generativo para mantener coherencia.
+- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Luxury Amplifier</span>** → Estética editorial de alto nivel inyectada mediante DNA neural.  
+- **<span style="color:#a5b4fc; text-shadow: 0 0 15px #6366f1;">Mutation Emergence</span>** → Variaciones creativas coherentes.
 
 ---
 
@@ -65,6 +62,7 @@ El **A+B Engine** incluye:
 - **Animaciones**: Framer Motion  
 - **Core de IA**: Google GenAI SDK (Gemini 1.5 Pro + Flash)  
 - **Motor Evolutivo**: Ciclos iterativos + Neural Critique Engine  
+- **Personalización**: Gestión de estado persistente (Theme Mode) para flujos de trabajo prolongados.
 - **Protección IP**: Neural Passport & Provenance Tracking (Registro de procedencia con Hash SHA-512)
 
 ---

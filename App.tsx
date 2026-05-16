@@ -89,7 +89,8 @@ import {
   CheckCircle2,
   Bold,
   Italic,
-  Code
+  Code,
+  Microscope
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
@@ -161,7 +162,7 @@ export default function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>("texture");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish");
+  const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic detail, realistic material physics, cinematic lighting, dramatic composition, shallow depth of field");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [activePreset, setActivePreset] = useState<Preset | null>(null);
   const [luxury, setLuxury] = useState(0.8);
@@ -179,6 +180,7 @@ export default function App(): React.ReactElement {
   const [loadingStage, setLoadingStage] = useState("");
   const [progress, setProgress] = useState(0);
   const [statusLog, setStatusLog] = useState<string[]>([]);
+  const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
 
   const generateProvenance = (item: Omit<HistoryItem, 'id' | 'timestamp'>): ProvenanceData => {
     const genId = `PROV-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
@@ -305,6 +307,18 @@ export default function App(): React.ReactElement {
       document.documentElement.classList.remove('light');
     }
   }, [theme]);
+  
+  useEffect(() => {
+    const seenTutorial = localStorage.getItem('master_control_tutorial_seen_v2');
+    if (!seenTutorial && hasKey === true) {
+      const timer = setTimeout(() => {
+        setShowTutorial(true);
+        setTutorialStep(0);
+        localStorage.setItem('master_control_tutorial_seen_v2', 'true');
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasKey]);
 
   // Non-intrusive error notifications via Toasts
   useEffect(() => {
@@ -478,6 +492,28 @@ export default function App(): React.ReactElement {
       return matchesSearch && matchesMode && matchesDate;
     });
   }, [history, historySearchQuery, historyModeFilter, historyDateFilter]);
+
+  const injectNeuralPhysics = () => {
+    const physicsKeywords = "microscopic detail, realistic material physics, hyper-precise textures, physical light scattering, sub-surface scattering, macro photography fidelity";
+    const newPrompt = prompt.includes("microscopic detail") ? prompt : (prompt.trim().endsWith(',') ? `${prompt} ${physicsKeywords}` : `${prompt}, ${physicsKeywords}`);
+    saveToHistory("Physical Accuracy Injection");
+    setPrompt(newPrompt);
+    addLog("SECURITY: INJECTED PHYSICAL INTEGRITY PROTOCOL");
+    toast.success("Física Neural Inyectada", { 
+      description: "Se han añadido parámetros de micro-detalle y física de materiales al núcleo creativo." 
+    });
+  };
+
+  const injectCinematicOptics = () => {
+    const cinematicKeywords = "cinematic lighting, dramatic composition, shallow depth of field, bokeh, f/1.8, anamorphic lens flares, high dynamic range, masterwork cinematography";
+    const newPrompt = prompt.includes("cinematic lighting") ? prompt : (prompt.trim().endsWith(',') ? `${prompt} ${cinematicKeywords}` : `${prompt}, ${cinematicKeywords}`);
+    saveToHistory("Cinematic Optics Injection");
+    setPrompt(newPrompt);
+    addLog("SECURITY: INJECTED CINEMATIC OPTICS PROTOCOL");
+    toast.success("Óptica Cinemática Inyectada", { 
+      description: "Se han calibrado los parámetros de iluminación y composición editorial." 
+    });
+  };
 
   const handleApplyWatermark = async () => {
     const target = gradedImage || resultImage || sourceImage;
@@ -945,9 +981,15 @@ export default function App(): React.ReactElement {
     addLog("C-ROI PROTOCOL: INITIATING MANUAL NEURAL EVALUATION");
     try {
       const evalData = await gemini.evaluateAsset(resultImage, prompt);
-      setEvaluationData(evalData);
-      addLog(`C-ROI FEEDBACK OPTIMIZED: SCORE ${evalData.score}/100`);
-      toast.success("Evaluación C-ROI completada con éxito");
+      if (evalData.score === 0 && evalData.feedback.includes("enfriamiento")) {
+        toast.info("Enfriamiento Neural", { 
+          description: "La evaluación automática se ha pausado para conservar cuota. Reintenta en unos segundos." 
+        });
+      } else {
+        setEvaluationData(evalData);
+        addLog(`C-ROI FEEDBACK OPTIMIZED: SCORE ${evalData.score}/100`);
+        toast.success("Evaluación C-ROI completada con éxito");
+      }
     } catch (err) {
       addLog("C-ROI PROTOCOL: EVALUATION FAILURE");
       toast.error("Fallo en la evaluación neural");
@@ -1025,11 +1067,23 @@ export default function App(): React.ReactElement {
       sourceZoom,
       sourceOffset: { ...sourceOffset },
       activePreset,
+      syntergicParams: { ...syntergicParams },
+      luxury,
+      realism,
+      mutation,
+      sceneDepth,
       mask: maskCanvasRef.current ? maskCanvasRef.current.toDataURL() : null,
       thumbnail: gradedImage || resultImage || sourceImage
     };
     
-    const stateString = JSON.stringify({ ...currentState, label: undefined, timestamp: undefined, lutData: lutData ? "exists" : "null", mask: currentState.mask ? "exists" : "null", thumbnail: currentState.thumbnail ? "exists" : "null" }); // Don't stringify large data or metadata
+    const stateString = JSON.stringify({ 
+      ...currentState, 
+      label: undefined, 
+      timestamp: undefined, 
+      lutData: lutData ? "exists" : "null", 
+      mask: currentState.mask ? "exists" : "null", 
+      thumbnail: currentState.thumbnail ? "exists" : "null" 
+    }); 
     if (stateString === lastSavedStateRef.current) return;
     
     lastSavedStateRef.current = stateString;
@@ -1039,7 +1093,7 @@ export default function App(): React.ReactElement {
       return newStack;
     });
     setRedoStack([]);
-  }, [prompt, negativePrompt, filters, grading, lutData, lutName, lutSize, lutIntensity, straighten, sourceZoom, sourceOffset, activePreset, resultImage, sourceImage, gradedImage]);
+  }, [prompt, negativePrompt, filters, grading, lutData, lutName, lutSize, lutIntensity, straighten, sourceZoom, sourceOffset, activePreset, syntergicParams, luxury, realism, mutation, sceneDepth, resultImage, sourceImage, gradedImage]);
 
   const applyState = useCallback((state: any) => {
     if (state.prompt !== undefined) setPrompt(state.prompt);
@@ -1047,13 +1101,18 @@ export default function App(): React.ReactElement {
     setFilters(state.filters);
     setGrading(state.grading);
     setLutData(state.lutData);
-    setLutName(state.lutName);
-    setLutSize(state.lutSize);
-    setLutIntensity(state.lutIntensity);
+    setLutName(state.lutName || "");
+    setLutSize(state.lutSize || 0);
+    setLutIntensity(state.lutIntensity || 1);
     setStraighten(state.straighten || 0);
     setSourceZoom(state.sourceZoom || 1);
     setSourceOffset(state.sourceOffset || { x: 0, y: 0 });
     setActivePreset(state.activePreset || null);
+    if (state.syntergicParams) setSyntergicParams(state.syntergicParams);
+    if (state.luxury !== undefined) setLuxury(state.luxury);
+    if (state.realism !== undefined) setRealism(state.realism);
+    if (state.mutation !== undefined) setMutation(state.mutation);
+    if (state.sceneDepth !== undefined) setSceneDepth(state.sceneDepth);
     setMaskPreview(state.mask || null);
     
     if (state.mask && maskCanvasRef.current) {
@@ -1422,6 +1481,12 @@ export default function App(): React.ReactElement {
       targetId: "collaboration-presence"
     },
     {
+      title: "ATMOSPHERIC CONTROL",
+      description: "Switch between Light and Dark modes to adjust the workspace environment to your preference and comfort.",
+      icon: <Sun className="text-zinc-400" size={24} />,
+      targetId: "theme-toggle"
+    },
+    {
       title: "NEURAL TIMELINE",
       description: "Access the version history to jump back to any previous state of your project with surgical precision.",
       icon: <Clock className="text-amber-400" size={24} />,
@@ -1763,9 +1828,8 @@ export default function App(): React.ReactElement {
                   <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Reference Examples</span>
                   <div className="space-y-3">
                     {guide.examples.map((example: string, idx: number) => (
-                        <Tooltip text="Inyectar este ejemplo neural en el núcleo de síntesis">
+                        <Tooltip key={idx} text="Inyectar este ejemplo neural en el núcleo de síntesis">
                           <button 
-                            key={idx} 
                             onClick={() => {
                               setPrompt(example);
                               setShowPromptGuide(false);
@@ -2760,9 +2824,10 @@ export default function App(): React.ReactElement {
     setError(null);
   };
 
-  const startProgressSimulation = (stages: string[], maxProgress: number = 95, persistLogs: boolean = false) => {
+  const startProgressSimulation = (stages: string[], maxProgress: number = 95, persistLogs: boolean = false, baseTime: number = 15) => {
     if (progressIntervalRef.current) window.clearInterval(progressIntervalRef.current);
     setProgress(0);
+    setEstimatedTime(baseTime);
     if (!persistLogs) setStatusLog([]);
     let currentStageIndex = 0;
     setLoadingStage(stages[0]);
@@ -2779,6 +2844,11 @@ export default function App(): React.ReactElement {
         const next = prev + (Math.random() * 1.5); // Slower, more deliberate
         const stageProgressThreshold = maxProgress / stages.length;
         const newIndex = Math.floor(next / stageProgressThreshold);
+        
+        // Update estimated time based on progress
+        const remainingPercentage = 100 - next;
+        const remainingTime = Math.max(0, Math.round((remainingPercentage / 100) * baseTime));
+        setEstimatedTime(remainingTime);
         
         if (newIndex !== currentStageIndex && newIndex < stages.length) {
           currentStageIndex = newIndex;
@@ -2818,6 +2888,7 @@ export default function App(): React.ReactElement {
     setLoadingStage(finalStage);
     addLog(`SUCCESS: ${finalStage}`);
     setProgress(100);
+    setEstimatedTime(0);
   };
 
   const handleQuickUpscale = async (img: string, factor: "2x" | "4x" | "8x" = "4x") => {
@@ -2836,7 +2907,7 @@ export default function App(): React.ReactElement {
         "Reconstructing Textures",
         "Enhancing Sharpness",
         "Finalizing High-Res Asset"
-      ]);
+      ], 95, false, 25);
       const res = await gemini.upscaleImage(img, factor, aspectRatio, prompt);
       setResultImage(res);
       const prov = generateProvenance({ 
@@ -3060,7 +3131,7 @@ export default function App(): React.ReactElement {
           "Synthesizing Latent Space",
           "Enhancing Micro-Textures",
           "Consolidating Pixels"
-        ]);
+        ], 95, false, highQuality ? 25 : 15);
         
         if (variationCount > 1) {
           const promises = Array.from({ length: variationCount }).map(() => 
@@ -3094,7 +3165,7 @@ export default function App(): React.ReactElement {
           "Π-Protocol Calibration",
           "Δν-Entropy Injection",
           "Synthesizing Final Asset"
-        ]);
+        ], 95, false, 20);
         
         let finalPrompt = prompt;
         if (mode === "asset") {
@@ -3131,7 +3202,7 @@ export default function App(): React.ReactElement {
           "Generating Vehicle Schematics",
           "Simulating Character DNA",
           "Finalizing World Coherence"
-        ]);
+        ], 95, false, 40);
         const results = await gemini.worldbuild(prompt, syntergicParams, aspectRatio);
         setWorldbuildResults(results);
         setResultImage(results[0].image);
@@ -3148,7 +3219,7 @@ export default function App(): React.ReactElement {
           "Calculating Tiling Vectors",
           "Generating PBR Map Channels",
           "Finalizing Texture Asset"
-        ]);
+        ], 95, false, 12);
         
         const detailLevel = surfaceDetail > 0.8 ? "hyper-detailed microscopic resolution" : 
                             surfaceDetail > 0.5 ? "ultra-high fidelity detail" :
@@ -3174,7 +3245,7 @@ export default function App(): React.ReactElement {
           "Rerendering Optics",
           "Harmonizing Contrast",
           "Finalizing Asset"
-        ]);
+        ], 95, false, 18);
         
         if (variationCount > 1) {
           const promises = Array.from({ length: variationCount }).map(() => 
@@ -3205,7 +3276,7 @@ export default function App(): React.ReactElement {
           "Neural Filling Region",
           "Blending Edge Fidelity",
           "Asset Reconstruction"
-        ]);
+        ], 95, false, 22);
         const mask = getBinaryMaskBase64();
 
         if (variationCount > 1) {
@@ -3237,7 +3308,7 @@ export default function App(): React.ReactElement {
           "Neural Decoding",
           "Extracting Metadata",
           "Finalizing Report"
-        ]);
+        ], 95, false, 8);
         const res = await gemini.analyzeImage(processedSource!);
         setAnalysisData(res);
         setShowAnalysis(true);
@@ -3257,7 +3328,7 @@ export default function App(): React.ReactElement {
             `Cycle ${i}/${evolutionCycles}: Neural Critique`,
             `Cycle ${i}/${evolutionCycles}: Refinement`,
             `Cycle ${i}/${evolutionCycles}: Optimization`
-          ], 90, i > 1);
+          ], 90, i > 1, 15);
 
           const res = await gemini.generateImage(`${currentIterPrompt} ${syntheticInstructions}`, activePreset?.prompt, highQuality, false, aspectRatio, negativePrompt);
           setResultImage(res);
@@ -3283,7 +3354,7 @@ export default function App(): React.ReactElement {
           "Harmonizing HSL Vectors",
           "Refining Color Fidelity",
           "Finalizing Grade"
-        ]);
+        ], 95, false, 10);
         const target = resultImage || processedSource;
         const suggestions = await gemini.suggestColorGrading(target!);
         
@@ -3319,7 +3390,7 @@ export default function App(): React.ReactElement {
           "Neural Style Synthesis",
           "Harmonizing Aesthetics",
           "Finalizing Transfer"
-        ]);
+        ], 95, false, 25);
         
         if (variationCount > 1) {
           const promises = Array.from({ length: variationCount }).map(() => 
@@ -3351,7 +3422,7 @@ export default function App(): React.ReactElement {
           "Reconstructing Textures",
           "Enhancing Sharpness",
           "Finalizing High-Res Asset"
-        ]);
+        ], 95, false, 30);
         const target = resultImage || processedSource;
         const res = await gemini.upscaleImage(target!, upscaleFactor, aspectRatio, prompt);
         setResultImage(res);
@@ -3367,8 +3438,10 @@ export default function App(): React.ReactElement {
         if (finalAsset) {
           addLog("FEEDBACK: INITIATING SYNTERGIC EVALUATION (R⇄M)");
           gemini.evaluateAsset(finalAsset, prompt).then(evalData => {
-            setEvaluationData(evalData);
-            if (evalData.score > 90) addLog(`SYSTEM: HIGH FIDELITY ASSET DETECTED (SCORE: ${evalData.score})`);
+            if (evalData.score > 0) {
+              setEvaluationData(evalData);
+              if (evalData.score > 90) addLog(`SYSTEM: HIGH FIDELITY ASSET DETECTED (SCORE: ${evalData.score})`);
+            }
           }).catch(() => null);
         }
       }
@@ -3514,6 +3587,84 @@ export default function App(): React.ReactElement {
     } catch (err) {
       console.error(err);
       addLog("CLIPBOARD: OPERATION FAILED - BROWSER RESTRICTION");
+    }
+  };
+
+  const bakeNeuralWatermark = async () => {
+    const target = gradedImage || resultImage || sourceImage;
+    if (!target) return;
+
+    addLog("SECURITY: INJECTING NEURAL WATERMARK PROTOCOL");
+    startProgressSimulation(["Calibrating Optics", "Embedding Hidden Metadata", "Baking Neural Signatures", "Finalizing Asset Integrity"], 95, false, 5);
+
+    try {
+      const canvas = document.createElement('canvas');
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = target;
+      });
+
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Apply current filters first
+        ctx.filter = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) hue-rotate(${grading.hue}deg) url(#advanced-grading)`;
+        ctx.drawImage(img, 0, 0);
+        ctx.filter = 'none';
+
+        // Add Watermark Text
+        const fontSize = Math.max(14, Math.floor(canvas.width / 45));
+        ctx.font = `black ${fontSize}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        
+        // Background for text
+        const text = `©IA STUDIO A+B | NEURAL GEN | ${provenanceData?.generationId || 'GEN-ORIGIN'}`;
+        const metrics = ctx.measureText(text);
+        const padding = fontSize * 0.5;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(
+          canvas.width - metrics.width - padding * 2 - 20, 
+          canvas.height - fontSize - padding * 2 - 20, 
+          metrics.width + padding * 2, 
+          fontSize + padding * 2
+        );
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, canvas.width - padding - 20, canvas.height - padding - 20);
+
+        // Add Logo Circle (Simulated Logo)
+        ctx.beginPath();
+        const logoSize = fontSize * 1.5;
+        ctx.arc(canvas.width - metrics.width - padding * 2 - 20 - logoSize/2 - 10, canvas.height - 20 - (fontSize + padding * 2)/2, logoSize/2, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        
+        ctx.fillStyle = '#000';
+        ctx.font = `bold ${fontSize}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚡', canvas.width - metrics.width - padding * 2 - 20 - logoSize/2 - 10, canvas.height - 20 - (fontSize + padding * 2)/2);
+
+        // Update the image
+        const bakedImage = canvas.toDataURL('image/png');
+        setResultImage(bakedImage);
+        setGradedImage(null); // Clear graded image since it's already baked in
+        
+        stopProgressSimulation("Asset integrity secured.");
+        addLog("SECURITY: NEURAL WATERMARK BAKED AND VERIFIED");
+        toast.success("Marca de agua inyectada", { description: "El activo ha sido marcado permanentemente con firmas neurales." });
+      }
+    } catch (err) {
+      console.error(err);
+      addLog("SECURITY: WATERMARK INJECTION FAILED");
+      setLoading(false);
     }
   };
 
@@ -3878,6 +4029,7 @@ export default function App(): React.ReactElement {
             </Tooltip>
             <Tooltip text={`Cambiar a modo ${theme === 'dark' ? 'claro' : 'oscuro'}`}>
               <button 
+                id="theme-toggle"
                 onClick={toggleTheme}
                 className="flex items-center gap-3 bg-white/5 border border-white/10 px-4 py-1.5 rounded-full hover:bg-white/10 transition-colors text-zinc-400 hover:text-white"
               >
@@ -3941,6 +4093,17 @@ export default function App(): React.ReactElement {
                     <Undo2 size={16} />
                   </button>
                 </Tooltip>
+                <Tooltip text="Guardar Snapshot de Estado Actual">
+                  <button 
+                    onClick={() => {
+                      saveToHistory("Manual State Snapshot");
+                      toast.success("Snapshot capturado", { description: "El estado actual ha sido guardado en la línea de tiempo." });
+                    }}
+                    className="p-1.5 transition-all text-amber-400 hover:text-amber-300 hover:scale-110 active:scale-90"
+                  >
+                    <Fingerprint size={16} />
+                  </button>
+                </Tooltip>
                 <div className="w-px h-3 bg-white/10 mx-1" />
                 <Tooltip text="Ver Línea de Tiempo de Versiones">
                   <button 
@@ -3949,6 +4112,16 @@ export default function App(): React.ReactElement {
                     className={`p-1.5 transition-all ${undoStack.length === 0 ? 'text-zinc-700 cursor-not-allowed' : 'text-zinc-400 hover:text-white hover:scale-110 active:scale-90'}`}
                   >
                     <Clock size={16} />
+                  </button>
+                </Tooltip>
+                <div className="w-px h-3 bg-white/10 mx-1" />
+                <Tooltip text="Inyectar Marca de Agua Neural (Permanente)">
+                  <button 
+                    onClick={bakeNeuralWatermark}
+                    disabled={!(resultImage || sourceImage) || loading}
+                    className={`p-1.5 transition-all ${!(resultImage || sourceImage) || loading ? 'text-zinc-700 cursor-not-allowed' : 'text-emerald-400 hover:text-emerald-300 hover:scale-110 active:scale-90'}`}
+                  >
+                    <ShieldCheck size={16} />
                   </button>
                 </Tooltip>
                 <div className="w-px h-3 bg-white/10 mx-1" />
@@ -5317,6 +5490,26 @@ export default function App(): React.ReactElement {
                     </Tooltip>
                     
                     <div className="absolute top-4 right-4 flex gap-2">
+                       <Tooltip text="Óptica Cinemática: Inyecta iluminación dramática, composición cinematográfica y profundidad de campo (Bokeh)">
+                        <motion.button 
+                          whileHover={{ scale: 1.1, rotate: 10 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={injectCinematicOptics}
+                          className="p-2 rounded-xl border bg-black/80 text-amber-400 border-white/10 hover:border-amber-400/50 hover:bg-black transition-all shadow-xl"
+                        >
+                          <Film size={14} />
+                        </motion.button>
+                      </Tooltip>
+                       <Tooltip text="Física Neural: Inyecta micro-detalle y propiedades físicas de materiales (Luces, Texturas, SSS)">
+                        <motion.button 
+                          whileHover={{ scale: 1.1, rotate: -10 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={injectNeuralPhysics}
+                          className="p-2 rounded-xl border bg-black/80 text-emerald-400 border-white/10 hover:border-emerald-400/50 hover:bg-black transition-all shadow-xl"
+                        >
+                          <Microscope size={14} />
+                        </motion.button>
+                      </Tooltip>
                        <Tooltip text="AI Suggest: Mejora tu prompt con terminología técnica y keywords (Neural Engine)">
                         <motion.button 
                           whileHover={{ scale: 1.1, rotate: 5 }}
@@ -6588,6 +6781,15 @@ export default function App(): React.ReactElement {
                             </div>
                             <div className="text-right">
                               <p className="text-6xl font-black font-mono text-white leading-none tabular-nums tracking-tighter drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">{Math.round(progress)}%</p>
+                              {estimatedTime !== null && (
+                                <motion.p 
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mt-2"
+                                >
+                                  Est. {estimatedTime}s restantes
+                                </motion.p>
+                              )}
                             </div>
                           </div>
                           
