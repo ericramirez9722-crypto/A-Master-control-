@@ -162,7 +162,7 @@ export default function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>("texture");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic detail, realistic material physics, cinematic lighting, dramatic composition, shallow depth of field");
+  const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic textures, realistic material physics, sub-surface scattering (SSS), physically accurate light scattering, cinematic lighting, dramatic composition, extreme shallow depth of field, f/1.4 aperture, razor-sharp focus");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [activePreset, setActivePreset] = useState<Preset | null>(null);
   const [luxury, setLuxury] = useState(0.8);
@@ -494,25 +494,42 @@ export default function App(): React.ReactElement {
   }, [history, historySearchQuery, historyModeFilter, historyDateFilter]);
 
   const injectNeuralPhysics = () => {
-    const physicsKeywords = "microscopic detail, realistic material physics, hyper-precise textures, physical light scattering, sub-surface scattering, macro photography fidelity";
-    const newPrompt = prompt.includes("microscopic detail") ? prompt : (prompt.trim().endsWith(',') ? `${prompt} ${physicsKeywords}` : `${prompt}, ${physicsKeywords}`);
-    saveToHistory("Physical Accuracy Injection");
-    setPrompt(newPrompt);
-    addLog("SECURITY: INJECTED PHYSICAL INTEGRITY PROTOCOL");
-    toast.success("Física Neural Inyectada", { 
-      description: "Se han añadido parámetros de micro-detalle y física de materiales al núcleo creativo." 
-    });
+    const physicsKeywords = "microscopic textures, realistic material physics, hyper-precise textures, physically accurate light scattering, sub-surface scattering (SSS), refractive index accuracy, macro photography fidelity, fine-grained material details";
+    const needsUpdate = !prompt.includes("sub-surface scattering") || !prompt.includes("light scattering");
+    const newPrompt = needsUpdate ? (prompt.trim().endsWith(',') ? `${prompt} ${physicsKeywords}` : `${prompt}, ${physicsKeywords}`) : prompt;
+    
+    if (needsUpdate) {
+      saveToHistory("Physical Accuracy Injection");
+      setPrompt(newPrompt);
+      addLog("SECURITY: INJECTED PHYSICAL INTEGRITY PROTOCOL");
+      toast.success("Física Neural Inyectada", { 
+        description: "Se han calibrado parámetros de micro-detalle, SSS y física de materiales avanzada." 
+      });
+    } else {
+      toast.info("Física Ya Calibrada", {
+        description: "El motor de integridad física ya opera con parámetros de micro-detalle máximos."
+      });
+    }
   };
 
   const injectCinematicOptics = () => {
-    const cinematicKeywords = "cinematic lighting, dramatic composition, shallow depth of field, bokeh, f/1.8, anamorphic lens flares, high dynamic range, masterwork cinematography";
-    const newPrompt = prompt.includes("cinematic lighting") ? prompt : (prompt.trim().endsWith(',') ? `${prompt} ${cinematicKeywords}` : `${prompt}, ${cinematicKeywords}`);
-    saveToHistory("Cinematic Optics Injection");
-    setPrompt(newPrompt);
-    addLog("SECURITY: INJECTED CINEMATIC OPTICS PROTOCOL");
-    toast.success("Óptica Cinemática Inyectada", { 
-      description: "Se han calibrado los parámetros de iluminación y composición editorial." 
-    });
+    const cinematicKeywords = "cinematic lighting, dramatic composition, shallow depth of field, anamorphic bokeh, f/1.8, anamorphic lens flares, volumetric lighting, rim lighting, atmospheric haze, high dynamic range, masterwork cinematography";
+    // Check for a few key ones to ensure we don't double up too much, but allow expansion
+    const needsUpdate = !prompt.includes("anamorphic bokeh") || !prompt.includes("volumetric lighting");
+    const newPrompt = needsUpdate ? (prompt.trim().endsWith(',') ? `${prompt} ${cinematicKeywords}` : `${prompt}, ${cinematicKeywords}`) : prompt;
+    
+    if (needsUpdate) {
+      saveToHistory("Cinematic Optics Injection");
+      setPrompt(newPrompt);
+      addLog("SECURITY: INJECTED CINEMATIC OPTICS PROTOCOL");
+      toast.success("Óptica Cinemática Inyectada", { 
+        description: "Se han calibrado los parámetros de iluminación y composición editorial avanzada." 
+      });
+    } else {
+      toast.info("Óptica Ya Calibrada", {
+        description: "Los parámetros cinemáticos avanzados ya están presentes en el núcleo."
+      });
+    }
   };
 
   const handleApplyWatermark = async () => {
@@ -5976,6 +5993,33 @@ export default function App(): React.ReactElement {
                 </div>
               </div>
 
+              <div className="w-full space-y-3 px-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Escalado Neural (4K+)</label>
+                  <Tooltip text="Aumenta la resolución y reconstruye detalles perdidos usando el motor Gemini 3.1 Pro">
+                    <div className="flex items-center gap-1 cursor-help">
+                      <Zap size={10} className="text-amber-400 animate-pulse" />
+                      <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">Hi-Res Upgrade</span>
+                    </div>
+                  </Tooltip>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["2x", "4x", "8x"] as const).map(factor => (
+                    <motion.button
+                      key={factor}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      disabled={!(resultImage || sourceImage) || loading}
+                      onClick={() => handleQuickUpscale(resultImage || sourceImage || "", factor)}
+                      className={`py-3 rounded-xl text-[10px] font-black transition-all border flex flex-col items-center gap-1 ${!(resultImage || sourceImage) || loading ? "opacity-30 cursor-not-allowed bg-zinc-900/40 border-white/5 text-zinc-600" : "bg-zinc-900/60 text-amber-400 border-amber-400/20 hover:border-amber-400/50 hover:bg-amber-400/5"}`}
+                    >
+                      <span className="text-[12px]">{factor}</span>
+                      <span className="text-[7px] opacity-70 uppercase tracking-tighter">Magnificar</span>
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+
               {loading && (
                 <motion.button 
                   whileHover={{ scale: 1.05 }}
@@ -5997,11 +6041,28 @@ export default function App(): React.ReactElement {
                   id="action-button" 
                   whileHover={!loading ? { scale: 1.02, boxShadow: "0 0 30px rgba(255,255,255,0.2)" } : {}}
                   whileTap={!loading ? { scale: 0.98 } : {}}
+                  animate={loading ? {
+                    boxShadow: [
+                      "0 0 12px rgba(245, 158, 11, 0.15), inset 0 0 0px rgba(245, 158, 11, 0)",
+                      "0 0 28px rgba(245, 158, 11, 0.45), inset 0 0 8px rgba(245, 158, 11, 0.25)",
+                      "0 0 12px rgba(245, 158, 11, 0.15), inset 0 0 0px rgba(245, 158, 11, 0)"
+                    ],
+                    borderColor: [
+                      "rgba(245, 158, 11, 0.2)",
+                      "rgba(245, 158, 11, 0.6)",
+                      "rgba(245, 158, 11, 0.2)"
+                    ],
+                    transition: {
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }
+                  } : {}}
                   onClick={handleExecution} 
                   disabled={loading} 
-                  className={`w-full py-6 rounded-3xl font-black text-xs uppercase tracking-[0.5em] flex items-center justify-center gap-4 transition-all shadow-[0_30px_60px_-15px_rgba(255,255,255,0.1)] ${loading ? "bg-zinc-800 text-zinc-600 cursor-not-allowed" : "bg-white text-black hover:bg-zinc-200"}`}
+                  className={`w-full py-6 rounded-3xl font-black text-xs uppercase tracking-[0.5em] flex items-center justify-center gap-4 transition-all shadow-[0_30px_60px_-15px_rgba(255,255,255,0.1)] ${loading ? "bg-zinc-950 text-amber-400 border border-amber-500/20 cursor-not-allowed" : "bg-white text-black hover:bg-zinc-200 border border-transparent"}`}
                 >
-                  {loading ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18} fill="currentColor"/>}
+                  {loading ? <Loader2 className="animate-spin text-amber-400" size={18}/> : <Zap size={18} fill="currentColor"/>}
                   {loading ? "SINTETIZANDO" : mode === "color-grading" ? "OPTIMIZAR COLOR" : "DISPARAR PULSO"}
                 </motion.button>
               </Tooltip>
