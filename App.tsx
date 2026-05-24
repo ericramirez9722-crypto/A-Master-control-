@@ -1204,20 +1204,6 @@ export default function App(): React.ReactElement {
     addLog("REDO: ADVANCING TO NEXT NEURAL STATE");
   }, [redoStack, prompt, negativePrompt, filters, grading, lutData, lutName, lutSize, lutIntensity, straighten, sourceZoom, sourceOffset, activePreset, applyState]);
 
-  // Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        if (e.shiftKey) redo();
-        else undo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-        redo();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo]);
-
   // Real-time Collaboration Logic
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -3486,6 +3472,56 @@ export default function App(): React.ReactElement {
       setTimeout(() => { setLoading(false); setLoadingStage(""); setProgress(0); }, 1200);
     }
   };
+
+  // Keyboard Shortcuts (Placed below handleExecution to ensure correct scope availability)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Ctrl + Z / Y (Undo/Redo)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+      
+      // 2. Ctrl + S (Save snapshot to history)
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveToHistory("Manual State Snapshot");
+        toast.success("Snapshot capturado", { 
+          description: "El estado actual ha sido guardado en la línea de tiempo mediante atajo de teclado." 
+        });
+      }
+      
+      // 3. Enter (Trigger Generation Action)
+      else if (e.key === 'Enter') {
+        const activeEl = document.activeElement;
+        
+        // Stop if user is typing in a search/filter input to avoid canceling their natural input actions
+        const isSearch = activeEl?.getAttribute('placeholder')?.toLowerCase().includes('buscar') || 
+                         activeEl?.id?.toLowerCase().includes('search');
+        if (isSearch) return;
+
+        // Shift + Enter in textarea triggers a standard new line
+        if (activeEl && activeEl.tagName === 'TEXTAREA' && e.shiftKey) {
+          return;
+        }
+
+        // Otherwise, allow triggering generation action
+        if (!loading) {
+          e.preventDefault();
+          handleExecution();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo, saveToHistory, loading, handleExecution]);
 
   const neuralAutoBalance = async () => {
     if (!resultImage && !sourceImage) return;
