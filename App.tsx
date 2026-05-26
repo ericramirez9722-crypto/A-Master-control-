@@ -63,6 +63,8 @@ import {
   FileCode,
   Box,
   Layout,
+  LayoutGrid,
+  List,
   History,
   X,
   Check,
@@ -162,6 +164,7 @@ export default function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>("texture");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [historyLayout, setHistoryLayout] = useState<"list" | "grid">("list");
   const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic textures, realistic material physics, sub-surface scattering (SSS), physically accurate light scattering, cinematic lighting, dramatic composition, extreme shallow depth of field, f/1.4 aperture, razor-sharp focus");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [activePreset, setActivePreset] = useState<Preset | null>(null);
@@ -1882,6 +1885,24 @@ export default function App(): React.ReactElement {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-xl mr-2">
+                  <Tooltip text="Vista de Lista">
+                    <button 
+                      onClick={() => setHistoryLayout("list")}
+                      className={`p-1.5 rounded-lg transition-all ${historyLayout === "list" ? "bg-white text-black shadow-md scale-105" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+                    >
+                      <List size={14} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Vista de Galería">
+                    <button 
+                      onClick={() => setHistoryLayout("grid")}
+                      className={`p-1.5 rounded-lg transition-all ${historyLayout === "grid" ? "bg-white text-black shadow-md scale-105" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+                    >
+                      <LayoutGrid size={14} />
+                    </button>
+                  </Tooltip>
+                </div>
                 <button 
                   onClick={exportHistory}
                   disabled={history.length === 0}
@@ -1954,6 +1975,81 @@ export default function App(): React.ReactElement {
                   {history.length === 0 ? "No hay registros aún" : "No se encontraron resultados"}
                 </p>
               </div>
+            ) : historyLayout === "grid" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredHistory.map((item) => {
+                  const isActive = item.image === resultImage;
+                  return (
+                    <div key={item.id} className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col group hover:border-white/20 transition-all relative ${isActive ? 'border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20' : 'border-white/5'}`}>
+                      {isActive && (
+                        <div className="absolute top-0 right-0 z-10">
+                          <div className="bg-amber-500 text-black text-[7px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest shadow-lg">
+                            Activo
+                          </div>
+                        </div>
+                      )}
+                      <div className="w-full aspect-square relative overflow-hidden bg-black/40 border-b border-white/5">
+                        <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                        <div className="absolute top-3 left-3 flex gap-1">
+                          <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
+                            <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">{item.mode.includes('upscale') ? 'Upscale' : item.mode}</span>
+                          </div>
+                          {item.mode === 'upscale-8x' && (
+                            <div className="px-2 py-0.5 bg-amber-500 rounded-lg shadow-lg animate-pulse">
+                              <span className="text-[7px] font-black uppercase tracking-widest text-black">4K ULTRA</span>
+                            </div>
+                          )}
+                        </div>
+                        <Tooltip text="Restablecer este asset neural a la interfaz de control principal para refinamiento adicional">
+                          <button 
+                            onClick={() => {
+                              setResultImage(item.image);
+                              if (item.provenance) setProvenanceData(item.provenance);
+                              setShowHistory(false);
+                            }}
+                            className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <div className="px-4 py-2 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[9px] transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                              Cargar Asset
+                            </div>
+                          </button>
+                        </Tooltip>
+                      </div>
+                      <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start">
+                            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Prompt Neural</p>
+                            {item.provenance && (
+                              <button 
+                                onClick={() => setSelectedProvenance(item.provenance!)}
+                                className="text-zinc-500 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
+                              >
+                                <ShieldCheck size={12} />
+                                <span className="text-[7px] font-black uppercase tracking-widest">Procedencia</span>
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-zinc-300 line-clamp-3 leading-relaxed italic">"{item.prompt}"</p>
+                        </div>
+                        <div className="flex items-center justify-between pt-3 border-t border-white/5 gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[7px] font-black text-zinc-650 uppercase tracking-widest">Sincronización</p>
+                            <p className="text-[9px] font-mono text-zinc-400 truncate">{new Date(item.timestamp).toLocaleTimeString()}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button onClick={() => window.open(item.image, '_blank')} className="p-2 bg-white/5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+                              <Maximize2 size={13} />
+                            </button>
+                            <button onClick={() => handleQuickUpscale(item.image)} className="p-2 bg-white/5 rounded-lg text-amber-400 hover:bg-amber-400/10 transition-colors">
+                              <Zap size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="flex flex-col gap-4">
                 {filteredHistory.map((item) => {
@@ -1968,74 +2064,74 @@ export default function App(): React.ReactElement {
                         </div>
                       )}
                       <div className="w-full sm:w-40 aspect-video sm:aspect-square shrink-0 relative overflow-hidden bg-black/40 border-b sm:border-b-0 sm:border-r border-white/5">
-                      <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                      <div className="absolute top-3 left-3 flex gap-1">
-                        <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
-                          <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">{item.mode.includes('upscale') ? 'Upscale' : item.mode}</span>
-                        </div>
-                        {item.mode === 'upscale-8x' && (
-                          <div className="px-2 py-0.5 bg-amber-500 rounded-lg shadow-lg animate-pulse">
-                            <span className="text-[7px] font-black uppercase tracking-widest text-black">4K ULTRA</span>
+                        <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                        <div className="absolute top-3 left-3 flex gap-1">
+                          <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
+                            <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">{item.mode.includes('upscale') ? 'Upscale' : item.mode}</span>
                           </div>
-                        )}
-                      </div>
-                      <Tooltip text="Restablecer este asset neural a la interfaz de control principal para refinamiento adicional">
-                        <button 
-                          onClick={() => {
-                            setResultImage(item.image);
-                            if (item.provenance) setProvenanceData(item.provenance);
-                            setShowHistory(false);
-                          }}
-                          className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <div className="px-4 py-2 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[9px] transform translate-y-2 group-hover:translate-y-0 transition-transform">
-                            Cargar Asset
-                          </div>
-                        </button>
-                      </Tooltip>
-                    </div>
-                    <div className="p-6 flex-1 flex flex-col justify-between min-w-0">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-start">
-                          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Prompt Neural</p>
-                          {item.provenance && (
-                            <button 
-                              onClick={() => setSelectedProvenance(item.provenance!)}
-                              className="text-zinc-500 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
-                            >
-                              <ShieldCheck size={12} />
-                              <span className="text-[7px] font-black uppercase tracking-widest">Procedencia</span>
-                            </button>
+                          {item.mode === 'upscale-8x' && (
+                            <div className="px-2 py-0.5 bg-amber-500 rounded-lg shadow-lg animate-pulse">
+                              <span className="text-[7px] font-black uppercase tracking-widest text-black">4K ULTRA</span>
+                            </div>
                           )}
                         </div>
-                        <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed italic">"{item.prompt}"</p>
+                        <Tooltip text="Restablecer este asset neural a la interfaz de control principal para refinamiento adicional">
+                          <button 
+                            onClick={() => {
+                              setResultImage(item.image);
+                              if (item.provenance) setProvenanceData(item.provenance);
+                              setShowHistory(false);
+                            }}
+                            className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <div className="px-4 py-2 bg-white text-black rounded-xl font-black uppercase tracking-widest text-[9px] transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                              Cargar Asset
+                            </div>
+                          </button>
+                        </Tooltip>
                       </div>
-                      <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                        <div className="flex gap-6">
-                          <div className="space-y-1">
-                            <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest">ID Registro</p>
-                            <p className="text-[9px] font-mono text-zinc-400">{item.id}</p>
+                      <div className="p-6 flex-1 flex flex-col justify-between min-w-0">
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start">
+                            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Prompt Neural</p>
+                            {item.provenance && (
+                              <button 
+                                onClick={() => setSelectedProvenance(item.provenance!)}
+                                className="text-zinc-500 hover:text-emerald-400 transition-colors flex items-center gap-1.5"
+                              >
+                                <ShieldCheck size={12} />
+                                <span className="text-[7px] font-black uppercase tracking-widest">Procedencia</span>
+                              </button>
+                            )}
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest">Sincronización</p>
-                            <p className="text-[9px] font-mono text-zinc-400">{new Date(item.timestamp).toLocaleTimeString()}</p>
-                          </div>
+                          <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed italic">"{item.prompt}"</p>
                         </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => window.open(item.image, '_blank')} className="p-2 bg-white/5 rounded-lg text-zinc-400 hover:text-white transition-colors">
-                            <Maximize2 size={14} />
-                          </button>
-                          <button onClick={() => handleQuickUpscale(item.image)} className="p-2 bg-white/5 rounded-lg text-amber-400 hover:bg-amber-400/10 transition-colors">
-                            <Zap size={14} />
-                          </button>
+                        <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                          <div className="flex gap-6">
+                            <div className="space-y-1">
+                              <p className="text-[7px] font-black text-zinc-650 uppercase tracking-widest">ID Registro</p>
+                              <p className="text-[9px] font-mono text-zinc-400">{item.id}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[7px] font-black text-zinc-650 uppercase tracking-widest">Sincronización</p>
+                              <p className="text-[9px] font-mono text-zinc-400">{new Date(item.timestamp).toLocaleTimeString()}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={() => window.open(item.image, '_blank')} className="p-2 bg-white/5 rounded-lg text-zinc-400 hover:text-white transition-colors">
+                              <Maximize2 size={14} />
+                            </button>
+                            <button onClick={() => handleQuickUpscale(item.image)} className="p-2 bg-white/5 rounded-lg text-amber-400 hover:bg-amber-400/10 transition-colors">
+                              <Zap size={14} />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
