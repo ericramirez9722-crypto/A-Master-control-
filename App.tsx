@@ -165,6 +165,8 @@ export default function App(): React.ReactElement {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLayout, setHistoryLayout] = useState<"list" | "grid">("list");
+  const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>("all");
+  const [collapsedPresetCategories, setCollapsedPresetCategories] = useState<Record<string, boolean>>({});
   const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic textures, realistic material physics, sub-surface scattering (SSS), physically accurate light scattering, cinematic lighting, dramatic composition, extreme shallow depth of field, f/1.4 aperture, razor-sharp focus");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [activePreset, setActivePreset] = useState<Preset | null>(null);
@@ -4667,25 +4669,63 @@ export default function App(): React.ReactElement {
                     color: "text-purple-400",
                     tooltip: "Controls stochastic noise injection into the generation branch. High Δν (25%+) promotes divergent compositions and unique micro-details. Visual Example: A 'forest' might include bioluminescent spores. Low Δν (<5%) ensures deterministic, standard studio framing."
                   }
-                ].map(p => (
-                  <Tooltip key={p.key} text={p.tooltip}>
-                    <div className="space-y-2 w-full">
-                      <div className="flex justify-between text-[9px] font-bold uppercase tracking-tighter">
-                        <span className={p.color}>{p.label}</span>
-                        <span className="text-zinc-500">{p.desc}</span>
-                        <span className="text-white">{(syntergicParams as any)[p.key]}%</span>
+                ].map(p => {
+                  const currentValue = (syntergicParams as any)[p.key];
+                  const activeTrackColor = 
+                    p.key === "lambda" ? "bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.3)]" :
+                    p.key === "protocol" ? "bg-gradient-to-r from-emerald-600 to-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]" :
+                    "bg-gradient-to-r from-purple-600 to-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.3)]";
+
+                  const thumbColor =
+                    p.key === "lambda" ? "bg-blue-400 border-blue-300 shadow-[0_0_8px_rgba(59,130,246,0.6)]" :
+                    p.key === "protocol" ? "bg-emerald-400 border-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.6)]" :
+                    "bg-purple-400 border-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.6)]";
+
+                  return (
+                    <Tooltip key={p.key} text={p.tooltip}>
+                      <div className="space-y-2 w-full">
+                        <div className="flex justify-between text-[9px] font-bold uppercase tracking-tighter">
+                          <span className={p.color}>{p.label}</span>
+                          <span className="text-zinc-500">{p.desc}</span>
+                          <span className="text-white">{currentValue}%</span>
+                        </div>
+                        
+                        {/* Custom Interactive Sliding Slider */}
+                        <div className="relative w-full h-5 flex items-center group">
+                          {/* Background Track */}
+                          <div className="absolute left-0 right-0 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            {/* Animated custom progress tracker */}
+                            <motion.div 
+                              className={`absolute left-0 top-0 h-full rounded-full ${activeTrackColor}`}
+                              animate={{ width: `${currentValue}%` }}
+                              transition={{ type: "spring", stiffness: 120, damping: 15 }}
+                            />
+                          </div>
+
+                          {/* Glow Animated Thumb */}
+                          <motion.div 
+                            className={`absolute w-3.5 h-3.5 rounded-full border border-white/40 cursor-ew-resize -ml-1.75 flex items-center justify-center ${thumbColor}`}
+                            animate={{ left: `${currentValue}%` }}
+                            transition={{ type: "spring", stiffness: 120, damping: 15 }}
+                            whileHover={{ scale: 1.25 }}
+                            whileTap={{ scale: 1.1 }}
+                          >
+                            <div className="w-1.5 h-1.5 bg-white rounded-full opacity-70" />
+                          </motion.div>
+
+                          {/* Invisible native range slider for perfect input handling */}
+                          <input 
+                            type="range" 
+                            min="0" max="100" 
+                            value={currentValue} 
+                            onChange={e => setSyntergicParams({...syntergicParams, [p.key]: +e.target.value})} 
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize" 
+                          />
+                        </div>
                       </div>
-                      <motion.input 
-                        whileHover={{ scale: 1.01 }}
-                        type="range" 
-                        min="0" max="100" 
-                        value={(syntergicParams as any)[p.key]} 
-                        onChange={e => setSyntergicParams({...syntergicParams, [p.key]: +e.target.value})} 
-                        className="w-full h-1 bg-zinc-800 rounded-lg accent-white cursor-ew-resize appearance-none hover:accent-zinc-300" 
-                      />
-                    </div>
-                  </Tooltip>
-                ))}
+                    </Tooltip>
+                  );
+                })}
               </div>
 
               <div className="pt-2 border-t border-white/5 space-y-3">
@@ -6043,62 +6083,123 @@ export default function App(): React.ReactElement {
                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] flex items-center gap-2">
                    <Palette size={12} className="text-amber-400" /> Neural Presets Archive
                  </p>
-                 <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">{IMAGE_PRESETS.length} Protocols</span>
+                 <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
+                   {selectedPresetCategory === "all" ? `${IMAGE_PRESETS.length} Protocols` : `${IMAGE_PRESETS.filter(p => p.category === selectedPresetCategory).length} Filtered`}
+                 </span>
+               </div>
+
+               {/* Horizontal Category Filtering Tabs */}
+               <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1 px-2 border-b border-white/5">
+                 {["all", ...Array.from(new Set(IMAGE_PRESETS.map(p => p.category)))].map(cat => (
+                   <button
+                     key={cat}
+                     onClick={() => setSelectedPresetCategory(cat)}
+                     className={`px-3 py-1.5 rounded-xl text-[8.5px] font-black uppercase tracking-wider transition-all duration-300 border whitespace-nowrap ${
+                       selectedPresetCategory === cat
+                         ? "bg-white text-black border-white shadow-lg scale-[1.03]"
+                         : "bg-zinc-900/45 text-zinc-550 border-white/5 hover:border-white/20 hover:text-white"
+                     }`}
+                   >
+                     {cat === "all" ? "Todos (All)" : cat}
+                   </button>
+                 ))}
                </div>
                
-               <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-2 custom-scroll">
-                {IMAGE_PRESETS.map(p => (
-                  <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
-                    <motion.button 
-                      whileHover={{ scale: 1.02, y: -2 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => { 
-                        saveToHistory(`Preset: ${p.name}`); 
-                        setActivePreset(p); 
-                        if (p.baseDNA) {
-                          setSyntergicParams(p.baseDNA);
-                          addLog(`PRESET_PROTOCOL: APPLIED ${p.name.toUpperCase()} DNA`);
-                        }
-                        toast.success(`Preset Seleccionado: ${p.name}`, {
-                           description: `Motor configurado para modo ${p.category}.`
-                        });
-                      }} 
-                      className={`group w-full relative p-4 rounded-2xl text-left border transition-all duration-300 ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-[0_15px_30px_rgba(255,255,255,0.15)] z-10" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20 hover:bg-zinc-800/60"}`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex flex-col min-w-0">
-                          <span className={`text-[8px] font-black uppercase tracking-widest mb-1 transition-colors ${activePreset?.id === p.id ? "text-zinc-600" : "text-zinc-500"}`}>
-                            {p.category}
-                          </span>
-                          <span className={`text-[11px] font-bold truncate leading-none ${activePreset?.id === p.id ? "text-black" : "text-white"}`}>
-                            {p.name}
-                          </span>
-                        </div>
-                        {p.color && (
-                          <div 
-                            className="w-3 h-3 rounded-full border border-black/10 shadow-sm shrink-0" 
-                            style={{ 
-                              background: p.color,
-                              boxShadow: activePreset?.id === p.id ? `0 0 10px ${p.color}44` : 'none'
-                             }} 
-                          />
-                        )}
-                      </div>
-                      
-                      {activePreset?.id === p.id && (
-                        <motion.div 
-                          layoutId="preset-active-indicator"
-                          className="absolute -right-1 -top-1 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center border-2 border-white shadow-xl"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                        >
-                          <Check size={10} strokeWidth={4} />
-                        </motion.div>
-                      )}
-                    </motion.button>
-                  </Tooltip>
-                ))}
-              </div>
+               {/* Grouped Collapsible Presets Container */}
+               <div className="space-y-3 max-h-80 overflow-y-auto pr-1.5 custom-scroll transition-all duration-300">
+                 {(selectedPresetCategory === "all" ? Array.from(new Set(IMAGE_PRESETS.map(p => p.category))) : [selectedPresetCategory]).map(cat => {
+                   const isCatCollapsed = selectedPresetCategory === "all" ? !!collapsedPresetCategories[cat] : false;
+                   const presetsInCat = IMAGE_PRESETS.filter(p => p.category === cat);
+                   if (presetsInCat.length === 0) return null;
+
+                   return (
+                     <div key={cat} className="space-y-2">
+                       {/* Collapsible Category Header Button */}
+                       <button
+                         onClick={() => {
+                           if (selectedPresetCategory === "all") {
+                             setCollapsedPresetCategories(prev => ({
+                               ...prev,
+                               [cat]: !prev[cat]
+                             }));
+                           }
+                         }}
+                         disabled={selectedPresetCategory !== "all"}
+                         className={`w-full flex items-center justify-between px-3 py-2.5 bg-zinc-900/35 border border-white/5 rounded-2xl transition-all group/cat ${selectedPresetCategory === "all" ? "cursor-pointer hover:bg-zinc-800/40 hover:border-white/10" : "cursor-default"}`}
+                       >
+                         <div className="flex items-center gap-2">
+                           <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 group-hover/cat:text-amber-400 transition-colors">
+                             {cat}
+                           </span>
+                           <span className="text-[8px] font-bold text-zinc-550 uppercase tracking-widest">
+                             ({presetsInCat.length})
+                           </span>
+                         </div>
+                         {selectedPresetCategory === "all" && (
+                           <div className="shrink-0 text-zinc-500 group-hover/cat:text-zinc-300 transition-colors">
+                             {isCatCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} className="text-amber-400" />}
+                           </div>
+                         )}
+                       </button>
+
+                       {/* Presets Grid inside Collapsible Area */}
+                       <div className={`grid grid-cols-2 gap-2 overflow-hidden transition-all duration-300 ease-in-out ${isCatCollapsed ? "max-h-0 opacity-0 pointer-events-none mt-0" : "max-h-[800px] opacity-100 mt-2"}`}>
+                         {presetsInCat.map(p => (
+                           <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
+                             <motion.button 
+                               whileHover={{ scale: 1.02, y: -2 }}
+                               whileTap={{ scale: 0.98 }}
+                               onClick={() => { 
+                                 saveToHistory(`Preset: ${p.name}`); 
+                                 setActivePreset(p); 
+                                 if (p.baseDNA) {
+                                   setSyntergicParams(p.baseDNA);
+                                   addLog(`PRESET_PROTOCOL: APPLIED ${p.name.toUpperCase()} DNA`);
+                                 }
+                                 toast.success(`Preset Seleccionado: ${p.name}`, {
+                                    description: `Motor configurado para modo ${p.category}.`
+                                 });
+                               }} 
+                               className={`group w-full relative p-4 rounded-2xl text-left border transition-all duration-300 ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-[0_15px_30px_rgba(255,255,255,0.15)] z-10" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20 hover:bg-zinc-800/60"}`}
+                             >
+                               <div className="flex items-start justify-between gap-3">
+                                 <div className="flex flex-col min-w-0">
+                                   <span className={`text-[8px] font-black uppercase tracking-widest mb-1 transition-colors ${activePreset?.id === p.id ? "text-zinc-600" : "text-zinc-500"}`}>
+                                     {p.category}
+                                   </span>
+                                   <span className={`text-[11px] font-bold truncate leading-none ${activePreset?.id === p.id ? "text-black" : "text-white"}`}>
+                                     {p.name}
+                                   </span>
+                                 </div>
+                                 {p.color && (
+                                   <div 
+                                     className="w-3 h-3 rounded-full border border-black/10 shadow-sm shrink-0" 
+                                     style={{ 
+                                       background: p.color,
+                                       boxShadow: activePreset?.id === p.id ? `0 0 10px ${p.color}44` : 'none'
+                                      }} 
+                                   />
+                                 )}
+                               </div>
+                               
+                               {activePreset?.id === p.id && (
+                                 <motion.div 
+                                   layoutId="preset-active-indicator"
+                                   className="absolute -right-1 -top-1 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center border-2 border-white shadow-xl"
+                                   initial={{ scale: 0 }}
+                                   animate={{ scale: 1 }}
+                                 >
+                                   <Check size={10} strokeWidth={4} />
+                                 </motion.div>
+                               )}
+                             </motion.button>
+                           </Tooltip>
+                         ))}
+                       </div>
+                     </div>
+                   );
+                 })}
+               </div>
             </div>
 
             <div className="flex flex-col items-center gap-6">
