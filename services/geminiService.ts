@@ -202,7 +202,8 @@ export class GeminiService {
   private async executeNeuralOperation<T>(
     operationId: string, 
     fn: (signal: AbortSignal) => Promise<T>, 
-    isPro: boolean = false
+    isPro: boolean = false,
+    silentOnFail: boolean = false
   ): Promise<T> {
     return retryManager({
       operationId,
@@ -211,23 +212,33 @@ export class GeminiService {
       baseDelay: 2000,
       timeoutMs: isPro ? 60000 : 30000, // Increased timeout for heavy visual tasks
       onRetry: this.onRetryCallback,
+      silentOnFail,
       onFail: (error) => {
-        const errorStr = (error?.message || JSON.stringify(error)).toLowerCase();
+        const errorStr = (error?.message || JSON.stringify(error) || "").toLowerCase();
+        const status = error?.status || error?.statusCode || error?.code || (error?.error && (error.error.code || error.error.status)) || "";
+        const statusStr = String(status).toUpperCase();
         
         // Handle common API key errors from Google
-        if (errorStr.includes("429") || errorStr.includes("resource_exhausted") || errorStr.includes("quota")) {
+        if (errorStr.includes("429") || errorStr.includes("resource_exhausted") || errorStr.includes("quota") || status === 429) {
           throw new Error("QUOTA_EXCEEDED: Has superado el límite de peticiones de tu API Key (Cuota excedida). Espera un minuto o verifica tu plan en Google AI Studio.");
         }
         
-        if (errorStr.includes("403") || errorStr.includes("permission_denied")) {
+        if (
+          errorStr.includes("403") || 
+          errorStr.includes("permission") || 
+          errorStr.includes("forbid") || 
+          errorStr.includes("caller does not have permission") || 
+          status === 403 || 
+          statusStr === "PERMISSION_DENIED"
+        ) {
           throw new Error("PERMISSION_DENIED: La API Key no tiene permisos para acceder a este modelo neural o la cuota ha sido superada.");
         }
         
-        if (errorStr.includes("400") || errorStr.includes("api key not valid") || errorStr.includes("invalid_argument")) {
+        if (errorStr.includes("400") || errorStr.includes("api key not valid") || errorStr.includes("invalid_argument") || status === 400) {
           throw new Error("API_KEY_INVALID: La clave de API de Gemini es inválida o ha sido revocada. Por favor, verifica tu clave en el menú de Ajustes del proyecto.");
         }
 
-        if (errorStr.includes("404") || errorStr.includes("not found")) {
+        if (errorStr.includes("404") || errorStr.includes("not found") || status === 404) {
           throw new Error("MODEL_NOT_FOUND: El modelo neural seleccionado no está disponible en tu región o con tu clave actual.");
         }
       }
@@ -235,7 +246,7 @@ export class GeminiService {
   }
 
   async generateImage(prompt: string, presetPrompt?: string, highQuality: boolean = false, useSearch: boolean = false, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
-    const callGenerate = async (model: string, isPro: boolean, attempts: number = 0) => {
+    const callGenerate = async (model: string, isPro: boolean, silentOnFail: boolean = false, attempts: number = 0) => {
       const sanitizedPrompt = prompt.length < 15 ? `Professional artistic representation of: ${prompt}` : prompt;
       
       return this.executeNeuralOperation(`generate-${prompt.slice(0, 10)}-${model}`, async (signal) => {
@@ -300,30 +311,35 @@ export class GeminiService {
             console.warn("[GEMINI_SERVICE] Safety filter hit. Retrying with ultra-neutral prompt...");
             const neutralPrompt = `High quality aesthetic image: ${prompt}`;
             // Recursive call with increased attempt count
-            return callGenerate(model, isPro, attempts + 1);
+            return callGenerate(model, isPro, silentOnFail, attempts + 1);
           }
           throw err;
         }
-      }, isPro);
+      }, isPro, silentOnFail);
     };
 
     try {
       const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-      return await callGenerate(primaryModel, highQuality);
+      return await callGenerate(primaryModel, highQuality, true);
     } catch (err: any) {
-      const msg = err.message || "";
-      // If primary fails, check if we can fallback
-      if (msg.includes("PERMISSION_DENIED") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND") || msg.includes("403")) {
+      const msg = (err?.message || "").toUpperCase();
+      const status = err?.status || err?.statusCode || err?.code || "";
+      const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND") || status === 403;
+      
+      if (isPermissionErr) {
         const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
         console.warn(`[GEMINI_SERVICE] Primary model failed (${msg.slice(0, 50)}...). Attempting fallback to ${fallback}.`);
         try {
-          return await callGenerate(fallback, false);
+          return await callGenerate(fallback, false, false);
         } catch (fallbackErr: any) {
           // If fallback also fails, provide a consolidated error
-          if (fallbackErr.message.includes("IMAGE_SAFETY")) {
+          if (fallbackErr.message?.includes("IMAGE_SAFETY")) {
             throw new Error("CONTENIDO_RESTRINGIDO: El prompt fue bloqueado por los filtros de seguridad en ambos modelos. Intenta usar un lenguaje más descriptivo y neutro.");
           }
-          if (fallbackErr.message.includes("PERMISSION_DENIED")) {
+          const fallbackMsg = (fallbackErr?.message || "").toUpperCase();
+          const fallbackStatus = fallbackErr?.status || fallbackErr?.statusCode || fallbackErr?.code || "";
+          const isFallbackPermissionErr = fallbackMsg.includes("PERMISSION") || fallbackMsg.includes("403") || fallbackStatus === 403;
+          if (isFallbackPermissionErr) {
             throw new Error("ERROR_DE_PERMISOS: No se pudo acceder a los modelos de generación. Cerciórate de que tu API Key tenga habilitados los modelos Imagen/Gemini Visual.");
           }
           throw fallbackErr;
@@ -334,7 +350,7 @@ export class GeminiService {
   }
 
   async editImage(base64Image: string, prompt: string, presetPrompt?: string, highQuality: boolean = true, aspectRatio: string = "1:1", negativePrompt?: string): Promise<string> {
-    const callEdit = async (model: string, isPro: boolean, attempts: number = 0) => {
+    const callEdit = async (model: string, isPro: boolean, silentOnFail: boolean = false, attempts: number = 0) => {
       const sanitizedPrompt = prompt.length < 15 ? `Professional edit based on: ${prompt}` : prompt;
       
       return this.executeNeuralOperation(`edit-${prompt.slice(0, 10)}-${model}`, async (signal) => {
@@ -385,25 +401,28 @@ export class GeminiService {
         } catch (err: any) {
           if (err.message.includes("IMAGE_SAFETY") && attempts === 0) {
             console.warn("[GEMINI_SERVICE] Safety hit during edit. Retrying...");
-            return callEdit(model, isPro, attempts + 1);
+            return callEdit(model, isPro, silentOnFail, attempts + 1);
           }
           throw err;
         }
-      }, isPro);
+      }, isPro, silentOnFail);
     };
 
     try {
       const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
-      return await callEdit(primaryModel, highQuality);
+      return await callEdit(primaryModel, highQuality, true);
     } catch (err: any) {
-      const msg = err.message || "";
-      if (msg.includes("PERMISSION_DENIED") || msg.includes("NOT_FOUND") || msg.includes("403") || msg.includes("LOCKED")) {
+      const msg = (err?.message || "").toUpperCase();
+      const status = err?.status || err?.statusCode || err?.code || "";
+      const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("NOT_FOUND") || msg.includes("LOCKED") || status === 403;
+
+      if (isPermissionErr) {
         const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
         console.warn(`[GEMINI_SERVICE] Edit fallback to ${fallback} due to: ${msg.slice(0, 30)}`);
         try {
-          return await callEdit(fallback, false);
+          return await callEdit(fallback, false, false);
         } catch (fallbackErr: any) {
-          if (fallbackErr.message.includes("IMAGE_SAFETY")) {
+          if (fallbackErr.message?.includes("IMAGE_SAFETY")) {
              throw new Error("EDICION_RESTRINGIDA: No se pudo realizar la edición por restricciones de seguridad. Intenta simplificar el prompt de edición.");
           }
           throw fallbackErr;
@@ -641,7 +660,7 @@ TECHNICAL MANDATE:
     };
     const targetSize = sizeMap[factor] || "2K";
 
-    const callUpscale = async (model: string, isPro: boolean, attempts: number = 0) => {
+    const callUpscale = async (model: string, isPro: boolean, silentOnFail: boolean = false, attempts: number = 0) => {
       return this.executeNeuralOperation(`upscale-${factor}-${model}`, async (signal) => {
         const ai = this.getClient();
         const cleanBase64 = base64Image.split(',')[1] || base64Image;
@@ -693,29 +712,35 @@ TECHNICAL MANDATE:
         } catch (err: any) {
           if (err.message.includes("IMAGE_SAFETY") && attempts === 0) {
             console.warn("[GEMINI_SERVICE] Safety hit during upscale. Retrying...");
-            return callUpscale(model, isPro, attempts + 1);
+            return callUpscale(model, isPro, silentOnFail, attempts + 1);
           }
           throw err;
         }
-      }, isPro);
+      }, isPro, silentOnFail);
     };
 
     try {
       const primaryModel = 'gemini-3.1-flash-image-preview';
-      return await callUpscale(primaryModel, true);
+      return await callUpscale(primaryModel, true, true);
     } catch (err: any) {
       const msg = (err?.message || JSON.stringify(err) || "").toUpperCase();
-      if (msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID") || msg.includes("MODEL_NOT_FOUND") || msg.includes("LOCKED") || msg.includes("403") || msg.includes("FORBIDDEN")) {
+      const status = err?.status || err?.statusCode || err?.code || "";
+      const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("FORBIDDEN") || msg.includes("ALLOW") || msg.includes("KEY_INVALID") || msg.includes("NOT_FOUND") || msg.includes("LOCKED") || status === 403;
+      
+      if (isPermissionErr) {
         const fallback = 'gemini-2.5-flash-image';
-        console.warn(`[GEMINI_SERVICE] Upscale fallback to ${fallback} due to: ${msg.slice(0, 30)}`);
+        console.warn(`[GEMINI_SERVICE] Upscale fallback to ${fallback} due to: ${msg.slice(0, 50)}`);
         try {
-          return await callUpscale(fallback, false);
+          return await callUpscale(fallback, false, true);
         } catch (fallbackErr: any) {
            if (fallbackErr.message?.includes("IMAGE_SAFETY")) {
              throw new Error("RECONSTRUCCION_BLOQUEADA: El motor de seguridad ha impedido el escalado de esta imagen.");
            }
            const fallbackMsg = (fallbackErr?.message || JSON.stringify(fallbackErr) || "").toUpperCase();
-           if (fallbackMsg.includes("PERMISSION_DENIED") || fallbackMsg.includes("API_KEY_INVALID") || fallbackMsg.includes("MODEL_NOT_FOUND") || fallbackMsg.includes("403") || fallbackMsg.includes("FORBIDDEN")) {
+           const fallbackStatus = fallbackErr?.status || fallbackErr?.statusCode || fallbackErr?.code || "";
+           const isFallbackPermissionErr = fallbackMsg.includes("PERMISSION") || fallbackMsg.includes("FORBIDDEN") || fallbackMsg.includes("403") || fallbackMsg.includes("ALLOW") || fallbackMsg.includes("KEY_INVALID") || fallbackMsg.includes("NOT_FOUND") || fallbackMsg.includes("LOCKED") || fallbackStatus === 403;
+           
+           if (isFallbackPermissionErr) {
              console.log("[GEMINI_SERVICE] 403/Permission denied on fallback. Activating Premium Local Resampling Fallback.");
              toast.info("Resample Neural Local Activo", {
                description: "El escalador premium en la nube requiere una API Key de Gemini con facturación habilitada. Usando el algoritmo de súper-resolución local con nitidez sub-pixel y reducción de ruido de manera óptima."
@@ -911,7 +936,10 @@ TECHNICAL MANDATE:
     try {
       return await callSyntergic(modelName, highQuality);
     } catch (err: any) {
-      if (err.message.includes("PERMISSION_DENIED") || err.message.includes("NOT_FOUND")) {
+      const msg = (err?.message || "").toUpperCase();
+      const status = err?.status || err?.statusCode || err?.code || "";
+      const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("NOT_FOUND") || status === 403;
+      if (isPermissionErr) {
         const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
         return await callSyntergic(fallback, false);
       }

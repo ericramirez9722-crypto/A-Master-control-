@@ -8,6 +8,7 @@ type RetryOptions<T> = {
   onRetry?: (attempt: number, error: any) => void;
   onFail?: (error: any) => void;
   shouldRetry?: (error: any) => boolean;
+  silentOnFail?: boolean;
 };
 
 const inFlight = new Map<string, AbortController>();
@@ -64,6 +65,7 @@ export async function retryManager<T>({
   onRetry,
   onFail,
   shouldRetry = defaultShouldRetry,
+  silentOnFail = false,
 }: RetryOptions<T>): Promise<T> {
   // 🔒 Idempotency: cancel previous identical operation if still in flight
   if (inFlight.has(operationId)) {
@@ -94,7 +96,11 @@ export async function retryManager<T>({
         }
 
         if (!shouldRetry(error) || attempt === maxRetries) {
-          console.error(`[RETRY_MANAGER] Final failure for ${operationId}:`, error);
+          if (silentOnFail) {
+            console.warn(`[RETRY_MANAGER] Non-critical final failure for ${operationId} (suppressed, fallback active):`, error?.message || error);
+          } else {
+            console.error(`[RETRY_MANAGER] Final failure for ${operationId}:`, error);
+          }
           onFail?.(error);
           throw error;
         }

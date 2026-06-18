@@ -92,7 +92,9 @@ import {
   Bold,
   Italic,
   Code,
-  Microscope
+  Microscope,
+  Save,
+  ChevronsLeftRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from 'sonner';
@@ -162,11 +164,31 @@ const MAX_SEARCH_LENGTH = 100;
 
 export default function App(): React.ReactElement {
   const [mode, setMode] = useState<Mode>("texture");
+  const [customPresets, setCustomPresets] = useState<Preset[]>(() => {
+    try {
+      const saved = localStorage.getItem('ia_studio_custom_presets');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Error loading custom presets:", e);
+      return [];
+    }
+  });
+  const [isSyncingPreset, setIsSyncingPreset] = useState<boolean>(false);
+  const [newPresetName, setNewPresetName] = useState<string>("");
+
+  const allPresets = useMemo(() => {
+    return [...IMAGE_PRESETS, ...customPresets];
+  }, [customPresets]);
+
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLayout, setHistoryLayout] = useState<"list" | "grid">("list");
   const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>("all");
   const [collapsedPresetCategories, setCollapsedPresetCategories] = useState<Record<string, boolean>>({});
+  const [blendPreset1Id, setBlendPreset1Id] = useState<string>("lux-01");
+  const [blendPreset2Id, setBlendPreset2Id] = useState<string>("hyper-01");
+  const [blendWeight, setBlendWeight] = useState<number>(50);
+  const [showPresetBlender, setShowPresetBlender] = useState<boolean>(false);
   const [prompt, setPrompt] = useState("Vibrant abstract neural threads with metallic finish, microscopic textures, realistic material physics, sub-surface scattering (SSS), physically accurate light scattering, cinematic lighting, dramatic composition, extreme shallow depth of field, f/1.4 aperture, razor-sharp focus");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [activePreset, setActivePreset] = useState<Preset | null>(null);
@@ -186,6 +208,39 @@ export default function App(): React.ReactElement {
   const [progress, setProgress] = useState(0);
   const [statusLog, setStatusLog] = useState<string[]>([]);
   const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
+
+  // Dynamic Aesthetic Preset Blending Engine
+  useEffect(() => {
+    if (!showPresetBlender) return;
+
+    const preset1 = allPresets.find(p => p.id === blendPreset1Id);
+    const preset2 = allPresets.find(p => p.id === blendPreset2Id);
+
+    if (preset1 && preset2) {
+      const weight1 = (100 - blendWeight) / 100;
+      const weight2 = blendWeight / 100;
+
+      const blendedDNA = {
+        lambda: Math.round(preset1.baseDNA.lambda * weight1 + preset2.baseDNA.lambda * weight2),
+        protocol: Math.round(preset1.baseDNA.protocol * weight1 + preset2.baseDNA.protocol * weight2),
+        entropy: Math.round(preset1.baseDNA.entropy * weight1 + preset2.baseDNA.entropy * weight2)
+      };
+
+      setSyntergicParams(blendedDNA);
+
+      const blendedPrompt = `${preset1.prompt} (${Math.round(weight1 * 100)}%), ${preset2.prompt} (${Math.round(weight2 * 100)}%)`;
+      const hybridPreset: Preset = {
+        id: `hybrid-${preset1.id}-${preset2.id}`,
+        category: "Custom",
+        name: `${preset1.name} × ${preset2.name} (${Math.round(weight2 * 100)}%)`,
+        color: preset2.color || "#a855f7",
+        baseDNA: blendedDNA,
+        prompt: blendedPrompt
+      };
+
+      setActivePreset(hybridPreset);
+    }
+  }, [blendPreset1Id, blendPreset2Id, blendWeight, showPresetBlender]);
 
   const generateProvenance = (item: Omit<HistoryItem, 'id' | 'timestamp'>): ProvenanceData => {
     const genId = `PROV-${Math.random().toString(36).slice(2, 11).toUpperCase()}`;
@@ -805,6 +860,8 @@ export default function App(): React.ReactElement {
   const [isApplyingLut, setIsApplyingLut] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [isSplitView, setIsSplitView] = useState(false);
+  const [isSliderView, setIsSliderView] = useState(false);
+  const [sliderPosition, setSliderPosition] = useState(50);
   const [gradedImage, setGradedImage] = useState<string | null>(null);
   const [evaluationData, setEvaluationData] = useState<{
     score: number;
@@ -2984,6 +3041,47 @@ export default function App(): React.ReactElement {
     setStatusLog(prev => [...prev, `[${new Date().toLocaleTimeString('en-GB', { hour12: false })}] ${msg.toUpperCase()}`]);
   };
 
+  const handleDeleteCustomPreset = (id: string, name: string) => {
+    const updated = customPresets.filter(p => p.id !== id);
+    setCustomPresets(updated);
+    localStorage.setItem('ia_studio_custom_presets', JSON.stringify(updated));
+    if (activePreset?.id === id) {
+      setActivePreset(null);
+    }
+    addLog(`PRESET_DELETED: ELIMINADO PRESET "${name.toUpperCase()}"`);
+    toast.success("Preset Eliminado", {
+      description: `El preset "${name}" ha sido eliminado.`
+    });
+  };
+
+  const handleSaveCustomPreset = () => {
+    const trimmedName = newPresetName.trim();
+    if (!trimmedName) {
+      toast.error("Error", { description: "Por favor, introduce un nombre para el preset." });
+      return;
+    }
+    const newPreset: Preset = {
+      id: `custom-p-${Date.now()}`,
+      category: "Custom",
+      name: trimmedName,
+      color: "#f59e0b",
+      baseDNA: { ...syntergicParams },
+      prompt: `Estilo personalizado con ADN Coherencia: ${syntergicParams.lambda}%, Protocolo: ${syntergicParams.protocol}%, Entropía: ${syntergicParams.entropy}%`
+    };
+    
+    const updated = [...customPresets, newPreset];
+    setCustomPresets(updated);
+    localStorage.setItem('ia_studio_custom_presets', JSON.stringify(updated));
+    
+    addLog(`PRESET_SYNCED: GUARDADO PRESET "${trimmedName.toUpperCase()}" EN DISPOSITIVO LOCAL`);
+    
+    toast.success("¡Preset Guardado!", {
+      description: `El preset "${trimmedName}" se ha sincronizado correctamente.`
+    });
+    
+    setIsSyncingPreset(false);
+  };
+
   const stopProgressSimulation = (finalStage: string = "Síntesis Completa") => {
     if (progressIntervalRef.current) window.clearInterval(progressIntervalRef.current);
     setLoadingStage(finalStage);
@@ -3039,7 +3137,7 @@ export default function App(): React.ReactElement {
     const target = gradedImage || resultImage || sourceImage;
     if (!target || loading) return;
     
-    const surrealPreset = IMAGE_PRESETS.find(p => p.id === "exo-02");
+    const surrealPreset = allPresets.find(p => p.id === "exo-02");
     if (!surrealPreset) return;
 
     setSourceImage(target);
@@ -4753,6 +4851,49 @@ export default function App(): React.ReactElement {
                     }
                   </p>
                 </div>
+
+                {/* Sync to History Button and Form */}
+                <div className="pt-2 border-t border-white/5">
+                  {isSyncingPreset ? (
+                    <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/25 space-y-3">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-amber-400">Preset Name</span>
+                        <input 
+                          type="text" 
+                          value={newPresetName} 
+                          onChange={e => setNewPresetName(e.target.value)}
+                          placeholder="My Custom DNA"
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <button 
+                          onClick={() => setIsSyncingPreset(false)} 
+                          className="px-2 py-1.5 rounded-lg border border-white/5 hover:bg-white/5 text-[9px] text-zinc-400 font-bold uppercase transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          onClick={handleSaveCustomPreset} 
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-500 text-black hover:bg-amber-400 font-black uppercase tracking-wider text-[9px] transition-all flex items-center gap-1"
+                        >
+                          <Save size={10} /> Save Preset
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        setIsSyncingPreset(true);
+                        setNewPresetName(`ADN Custom ${customPresets.length + 1}`);
+                      }}
+                      className="w-full py-2 px-3 bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/20 rounded-xl text-[9px] font-black uppercase tracking-wider text-amber-400 hover:text-amber-300 transition-all flex items-center justify-center gap-1.5 group"
+                    >
+                      <History size={11} className="group-hover:scale-110 transition-transform text-amber-400" />
+                      Sync to History
+                    </button>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -4932,9 +5073,23 @@ export default function App(): React.ReactElement {
                               <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Intensidad del Perfil LUT (Mezcla)</label>
                             </div>
                             <div className="flex items-center gap-2">
+                              <Tooltip text="Slider Comparativo (Antes/Después)">
+                                <button 
+                                  onClick={() => {
+                                    setIsSliderView(!isSliderView);
+                                    if (isSplitView) setIsSplitView(false);
+                                  }}
+                                  className={`p-1.5 rounded-lg transition-all border ${isSliderView ? 'bg-amber-500 text-black border-amber-400 font-bold' : 'bg-white/5 text-zinc-500 border-white/10 hover:text-white'}`}
+                                >
+                                  <ChevronsLeftRight size={12} />
+                                </button>
+                              </Tooltip>
                               <Tooltip text="Vista Dividida (Side-by-Side)">
                                 <button 
-                                  onClick={() => setIsSplitView(!isSplitView)}
+                                  onClick={() => {
+                                    setIsSplitView(!isSplitView);
+                                    if (isSliderView) setIsSliderView(false);
+                                  }}
                                   className={`p-1.5 rounded-lg transition-all border ${isSplitView ? 'bg-indigo-500 text-white border-indigo-400' : 'bg-white/5 text-zinc-500 border-white/10 hover:text-white'}`}
                                 >
                                   <Columns size={12} />
@@ -6084,122 +6239,335 @@ export default function App(): React.ReactElement {
                    <Palette size={12} className="text-amber-400" /> Neural Presets Archive
                  </p>
                  <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
-                   {selectedPresetCategory === "all" ? `${IMAGE_PRESETS.length} Protocols` : `${IMAGE_PRESETS.filter(p => p.category === selectedPresetCategory).length} Filtered`}
+                   {showPresetBlender ? "Blender Active" : selectedPresetCategory === "all" ? `${allPresets.length} Protocols` : `${allPresets.filter(p => p.category === selectedPresetCategory).length} Filtered`}
                  </span>
                </div>
 
-               {/* Horizontal Category Filtering Tabs */}
-               <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1 px-2 border-b border-white/5">
-                 {["all", ...Array.from(new Set(IMAGE_PRESETS.map(p => p.category)))].map(cat => (
-                   <button
-                     key={cat}
-                     onClick={() => setSelectedPresetCategory(cat)}
-                     className={`px-3 py-1.5 rounded-xl text-[8.5px] font-black uppercase tracking-wider transition-all duration-300 border whitespace-nowrap ${
-                       selectedPresetCategory === cat
-                         ? "bg-white text-black border-white shadow-lg scale-[1.03]"
-                         : "bg-zinc-900/45 text-zinc-550 border-white/5 hover:border-white/20 hover:text-white"
-                     }`}
-                   >
-                     {cat === "all" ? "Todos (All)" : cat}
-                   </button>
-                 ))}
+               {/* Mode Switcher: Standard vs Blending Protocol */}
+               <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-950/40 rounded-2xl border border-white/5">
+                 <button 
+                   onClick={() => setShowPresetBlender(false)}
+                   className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 ${!showPresetBlender ? "bg-zinc-800 text-white border border-white/10 shadow-md scale-[1.02]" : "text-zinc-500 hover:text-white"}`}
+                 >
+                   <Palette size={11} className={!showPresetBlender ? "text-amber-400" : ""} /> Standard Archive
+                 </button>
+                 <button 
+                   onClick={() => setShowPresetBlender(true)}
+                   className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 relative overflow-hidden ${showPresetBlender ? "bg-zinc-800 text-white border border-white/10 shadow-md scale-[1.02]" : "text-zinc-500 hover:text-white"}`}
+                 >
+                   {showPresetBlender && (
+                     <span className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-amber-400 via-sky-450 to-purple-400" />
+                   )}
+                   <Workflow size={11} className={showPresetBlender ? "text-amber-400 animate-pulse" : ""} /> Combined Blender
+                 </button>
                </div>
-               
-               {/* Grouped Collapsible Presets Container */}
-               <div className="space-y-3 max-h-80 overflow-y-auto pr-1.5 custom-scroll transition-all duration-300">
-                 {(selectedPresetCategory === "all" ? Array.from(new Set(IMAGE_PRESETS.map(p => p.category))) : [selectedPresetCategory]).map(cat => {
-                   const isCatCollapsed = selectedPresetCategory === "all" ? !!collapsedPresetCategories[cat] : false;
-                   const presetsInCat = IMAGE_PRESETS.filter(p => p.category === cat);
-                   if (presetsInCat.length === 0) return null;
 
-                   return (
-                     <div key={cat} className="space-y-2">
-                       {/* Collapsible Category Header Button */}
-                       <button
-                         onClick={() => {
-                           if (selectedPresetCategory === "all") {
-                             setCollapsedPresetCategories(prev => ({
-                               ...prev,
-                               [cat]: !prev[cat]
-                             }));
-                           }
-                         }}
-                         disabled={selectedPresetCategory !== "all"}
-                         className={`w-full flex items-center justify-between px-3 py-2.5 bg-zinc-900/35 border border-white/5 rounded-2xl transition-all group/cat ${selectedPresetCategory === "all" ? "cursor-pointer hover:bg-zinc-800/40 hover:border-white/10" : "cursor-default"}`}
-                       >
-                         <div className="flex items-center gap-2">
-                           <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 group-hover/cat:text-amber-400 transition-colors">
-                             {cat}
-                           </span>
-                           <span className="text-[8px] font-bold text-zinc-550 uppercase tracking-widest">
-                             ({presetsInCat.length})
-                           </span>
+               {showPresetBlender ? (
+                 <div className="p-4 bg-zinc-900/35 border border-white/5 rounded-3xl space-y-4">
+                   <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                     <span className="text-[9px] font-black uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
+                       <Workflow size={11} /> Aesthetic Fusion Chamber
+                     </span>
+                     <span className="text-[7px] font-mono text-zinc-500 uppercase tracking-widest">Dynamic Synthesis Unit</span>
+                   </div>
+
+                   {/* Dropdown Selectors for Preset 1 and Preset 2 */}
+                   <div className="grid grid-cols-2 gap-3">
+                     {/* Preset 1 Selector */}
+                     <div className="space-y-1.5">
+                       <label className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">Base Formula (A)</label>
+                       <div className="relative">
+                         <select
+                           value={blendPreset1Id}
+                           onChange={(e) => setBlendPreset1Id(e.target.value)}
+                           className="w-full pl-3 pr-8 py-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 hover:border-white/10 rounded-xl text-[9.5px] font-black uppercase tracking-wider text-white appearance-none focus:outline-none focus:ring-1 focus:ring-amber-550 focus:border-amber-550 transition-all cursor-pointer"
+                         >
+                           {allPresets.map(p => (
+                             <option key={p.id} value={p.id} className="bg-zinc-950 text-white">
+                               {p.name}
+                             </option>
+                           ))}
+                         </select>
+                         <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+                           <ChevronDown size={10} />
                          </div>
-                         {selectedPresetCategory === "all" && (
-                           <div className="shrink-0 text-zinc-500 group-hover/cat:text-zinc-300 transition-colors">
-                             {isCatCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} className="text-amber-400" />}
-                           </div>
-                         )}
-                       </button>
-
-                       {/* Presets Grid inside Collapsible Area */}
-                       <div className={`grid grid-cols-2 gap-2 overflow-hidden transition-all duration-300 ease-in-out ${isCatCollapsed ? "max-h-0 opacity-0 pointer-events-none mt-0" : "max-h-[800px] opacity-100 mt-2"}`}>
-                         {presetsInCat.map(p => (
-                           <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
-                             <motion.button 
-                               whileHover={{ scale: 1.02, y: -2 }}
-                               whileTap={{ scale: 0.98 }}
-                               onClick={() => { 
-                                 saveToHistory(`Preset: ${p.name}`); 
-                                 setActivePreset(p); 
-                                 if (p.baseDNA) {
-                                   setSyntergicParams(p.baseDNA);
-                                   addLog(`PRESET_PROTOCOL: APPLIED ${p.name.toUpperCase()} DNA`);
-                                 }
-                                 toast.success(`Preset Seleccionado: ${p.name}`, {
-                                    description: `Motor configurado para modo ${p.category}.`
-                                 });
-                               }} 
-                               className={`group w-full relative p-4 rounded-2xl text-left border transition-all duration-300 ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-[0_15px_30px_rgba(255,255,255,0.15)] z-10" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20 hover:bg-zinc-800/60"}`}
-                             >
-                               <div className="flex items-start justify-between gap-3">
-                                 <div className="flex flex-col min-w-0">
-                                   <span className={`text-[8px] font-black uppercase tracking-widest mb-1 transition-colors ${activePreset?.id === p.id ? "text-zinc-600" : "text-zinc-500"}`}>
-                                     {p.category}
-                                   </span>
-                                   <span className={`text-[11px] font-bold truncate leading-none ${activePreset?.id === p.id ? "text-black" : "text-white"}`}>
-                                     {p.name}
-                                   </span>
-                                 </div>
-                                 {p.color && (
-                                   <div 
-                                     className="w-3 h-3 rounded-full border border-black/10 shadow-sm shrink-0" 
-                                     style={{ 
-                                       background: p.color,
-                                       boxShadow: activePreset?.id === p.id ? `0 0 10px ${p.color}44` : 'none'
-                                      }} 
-                                   />
-                                 )}
-                               </div>
-                               
-                               {activePreset?.id === p.id && (
-                                 <motion.div 
-                                   layoutId="preset-active-indicator"
-                                   className="absolute -right-1 -top-1 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center border-2 border-white shadow-xl"
-                                   initial={{ scale: 0 }}
-                                   animate={{ scale: 1 }}
-                                 >
-                                   <Check size={10} strokeWidth={4} />
-                                 </motion.div>
-                               )}
-                             </motion.button>
-                           </Tooltip>
-                         ))}
                        </div>
+                       
+                       {/* Preset 1 Details Display */}
+                       {(() => {
+                         const p1 = allPresets.find(p => p.id === blendPreset1Id);
+                         if (!p1) return null;
+                         return (
+                           <div className="p-2 bg-black/40 rounded-lg border border-white/5 text-[7px] space-y-1">
+                             <div className="flex justify-between items-center text-zinc-500 font-mono">
+                               <span className="truncate">CAT: {p1.category.toUpperCase()}</span>
+                               <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: p1.color }} />
+                             </div>
+                             <div className="flex gap-2 text-zinc-400 font-bold">
+                               <span>Λ: {p1.baseDNA.lambda}%</span>
+                               <span>Π: {p1.baseDNA.protocol}%</span>
+                               <span>Δν: {p1.baseDNA.entropy}%</span>
+                             </div>
+                           </div>
+                         );
+                       })()}
                      </div>
-                   );
-                 })}
-               </div>
+
+                     {/* Preset 2 Selector */}
+                     <div className="space-y-1.5">
+                       <label className="text-[8px] font-black uppercase tracking-widest text-zinc-500 block">Target Formula (B)</label>
+                       <div className="relative">
+                         <select
+                           value={blendPreset2Id}
+                           onChange={(e) => setBlendPreset2Id(e.target.value)}
+                           className="w-full pl-3 pr-8 py-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 hover:border-white/10 rounded-xl text-[9.5px] font-black uppercase tracking-wider text-white appearance-none focus:outline-none focus:ring-1 focus:ring-amber-550 focus:border-amber-550 transition-all cursor-pointer"
+                         >
+                           {allPresets.map(p => (
+                             <option key={p.id} value={p.id} className="bg-zinc-950 text-white">
+                               {p.name}
+                             </option>
+                           ))}
+                         </select>
+                         <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+                           <ChevronDown size={10} />
+                         </div>
+                       </div>
+
+                       {/* Preset 2 Details Display */}
+                       {(() => {
+                         const p2 = allPresets.find(p => p.id === blendPreset2Id);
+                         if (!p2) return null;
+                         return (
+                           <div className="p-2 bg-black/40 rounded-lg border border-white/5 text-[7px] space-y-1">
+                             <div className="flex justify-between items-center text-zinc-500 font-mono">
+                               <span className="truncate">CAT: {p2.category.toUpperCase()}</span>
+                               <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: p2.color }} />
+                             </div>
+                             <div className="flex gap-2 text-zinc-400 font-bold">
+                               <span>Λ: {p2.baseDNA.lambda}%</span>
+                               <span>Π: {p2.baseDNA.protocol}%</span>
+                               <span>Δν: {p2.baseDNA.entropy}%</span>
+                             </div>
+                           </div>
+                         );
+                       })()}
+                     </div>
+                   </div>
+
+                   {/* Custom styled Fusion Slider */}
+                   <div className="space-y-2.5 p-3.5 bg-black/45 rounded-2xl border border-white/5">
+                     <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                       <span className="text-zinc-500">A ({100 - blendWeight}%)</span>
+                       <span className="text-amber-400">Fusion Bias: {blendWeight}%</span>
+                       <span className="text-zinc-400">B ({blendWeight}%)</span>
+                     </div>
+
+                     <div className="relative h-6 flex items-center group">
+                       {/* Blended Background Gradient track */}
+                       {(() => {
+                         const p1 = allPresets.find(p => p.id === blendPreset1Id);
+                         const p2 = allPresets.find(p => p.id === blendPreset2Id);
+                         const color1 = p1?.color || "#fbbf24";
+                         const color2 = p2?.color || "#a855f7";
+                         return (
+                           <div 
+                             className="absolute left-0 right-0 h-1.5 rounded-full overflow-hidden"
+                             style={{
+                               background: `linear-gradient(to right, ${color1}, ${color2})`
+                             }}
+                           >
+                             <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-black/40" />
+                           </div>
+                         );
+                       })()}
+
+                       {/* Interactive Glow thumb representing blended output color */}
+                       {(() => {
+                         const p1 = allPresets.find(p => p.id === blendPreset1Id);
+                         const p2 = allPresets.find(p => p.id === blendPreset2Id);
+                         const color1 = p1?.color || "#fbbf24";
+                         const color2 = p2?.color || "#a855f7";
+                         return (
+                           <motion.div
+                             className="absolute w-4.5 h-4.5 rounded-full border border-white shadow-lg cursor-ew-resize flex items-center justify-center -ml-2.25"
+                             animate={{ left: `${blendWeight}%` }}
+                             style={{
+                               background: `radial-gradient(circle, #ffffff 10%, ${color1} ${100 - blendWeight}%, ${color2} ${blendWeight}%)`,
+                               boxShadow: `0 0 12px ${color2}aa`
+                             }}
+                             transition={{ type: "spring", stiffness: 200, damping: 25 }}
+                           >
+                             <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
+                           </motion.div>
+                         );
+                       })()}
+
+                       {/* Native slider to catch interactions seamlessly */}
+                       <input
+                         type="range"
+                         min="0"
+                         max="100"
+                         value={blendWeight}
+                         onChange={(e) => setBlendWeight(+e.target.value)}
+                         className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize"
+                       />
+                     </div>
+                   </div>
+
+                   {/* Active DNA Synthesis feedback */}
+                   <div className="grid grid-cols-3 gap-2 bg-white/[0.02] border border-white/5 p-3 rounded-2xl text-center">
+                     <div>
+                       <p className="text-[7.5px] text-zinc-500 font-black uppercase tracking-widest">Λ Coherence</p>
+                       <p className="text-xs font-mono font-black text-blue-400 mt-1">{syntergicParams.lambda}%</p>
+                     </div>
+                     <div className="border-x border-white/5">
+                       <p className="text-[7.5px] text-zinc-500 font-black uppercase tracking-widest">Π Protocol</p>
+                       <p className="text-xs font-mono font-black text-emerald-400 mt-1">{syntergicParams.protocol}%</p>
+                     </div>
+                     <div>
+                       <p className="text-[7.5px] text-zinc-500 font-black uppercase tracking-widest">Δν Entropy</p>
+                       <p className="text-xs font-mono font-black text-purple-400 mt-1">{syntergicParams.entropy}%</p>
+                     </div>
+                   </div>
+
+                   {/* Hybrid Descriptor Prompt Preview */}
+                   <div className="p-3 bg-zinc-950/40 border border-white/5 rounded-2xl space-y-1">
+                     <p className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">Hybrid DNA Prompt Description</p>
+                     <p className="text-[9.5px] text-zinc-300 leading-relaxed italic line-clamp-2">
+                       "{activePreset?.prompt}"
+                     </p>
+                   </div>
+                 </div>
+               ) : (
+                 <>
+                   {/* Horizontal Category Filtering Tabs */}
+                   <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1 px-2 border-b border-white/5">
+                     {["all", ...Array.from(new Set(allPresets.map(p => p.category)))].map(cat => (
+                       <button
+                         key={cat}
+                         onClick={() => setSelectedPresetCategory(cat)}
+                         className={`px-3 py-1.5 rounded-xl text-[8.5px] font-black uppercase tracking-wider transition-all duration-300 border whitespace-nowrap ${
+                           selectedPresetCategory === cat
+                             ? "bg-white text-black border-white shadow-lg scale-[1.03]"
+                             : "bg-zinc-900/45 text-zinc-550 border-white/5 hover:border-white/20 hover:text-white"
+                         }`}
+                       >
+                         {cat === "all" ? "Todos (All)" : cat}
+                       </button>
+                     ))}
+                   </div>
+                   
+                   {/* Grouped Collapsible Presets Container */}
+                   <div className="space-y-3 max-h-80 overflow-y-auto pr-1.5 custom-scroll transition-all duration-300">
+                     {(selectedPresetCategory === "all" ? Array.from(new Set(allPresets.map(p => p.category))) : [selectedPresetCategory]).map(cat => {
+                       const isCatCollapsed = selectedPresetCategory === "all" ? !!collapsedPresetCategories[cat] : false;
+                       const presetsInCat = allPresets.filter(p => p.category === cat);
+                       if (presetsInCat.length === 0) return null;
+
+                       return (
+                         <div key={cat} className="space-y-2">
+                           {/* Collapsible Category Header Button */}
+                           <button
+                             onClick={() => {
+                               if (selectedPresetCategory === "all") {
+                                 setCollapsedPresetCategories(prev => ({
+                                   ...prev,
+                                   [cat]: !prev[cat]
+                                 }));
+                               }
+                             }}
+                             disabled={selectedPresetCategory !== "all"}
+                             className={`w-full flex items-center justify-between px-3 py-2.5 bg-zinc-900/35 border border-white/5 rounded-2xl transition-all group/cat ${selectedPresetCategory === "all" ? "cursor-pointer hover:bg-zinc-800/40 hover:border-white/10" : "cursor-default"}`}
+                           >
+                             <div className="flex items-center gap-2">
+                               <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 group-hover/cat:text-amber-400 transition-colors">
+                                 {cat}
+                               </span>
+                               <span className="text-[8px] font-bold text-zinc-550 uppercase tracking-widest">
+                                 ({presetsInCat.length})
+                               </span>
+                             </div>
+                             {selectedPresetCategory === "all" && (
+                               <div className="shrink-0 text-zinc-500 group-hover/cat:text-zinc-300 transition-colors">
+                                 {isCatCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} className="text-amber-400" />}
+                               </div>
+                             )}
+                           </button>
+
+                           {/* Presets Grid inside Collapsible Area */}
+                           <div className={`grid grid-cols-2 gap-2 overflow-hidden transition-all duration-300 ease-in-out ${isCatCollapsed ? "max-h-0 opacity-0 pointer-events-none mt-0" : "max-h-[800px] opacity-100 mt-2"}`}>
+                             {presetsInCat.map(p => (
+                               <Tooltip key={p.id} text={p.prompt} wide title={p.category}>
+                                 <motion.button 
+                                   whileHover={{ scale: 1.02, y: -2 }}
+                                   whileTap={{ scale: 0.98 }}
+                                   onClick={() => { 
+                                     saveToHistory(`Preset: ${p.name}`); 
+                                     setActivePreset(p); 
+                                     if (p.baseDNA) {
+                                       setSyntergicParams(p.baseDNA);
+                                       addLog(`PRESET_PROTOCOL: APPLIED ${p.name.toUpperCase()} DNA`);
+                                     }
+                                     toast.success(`Preset Seleccionado: ${p.name}`, {
+                                        description: `Motor configurado para modo ${p.category}.`
+                                     });
+                                   }} 
+                                   className={`group w-full relative p-4 rounded-2xl text-left border transition-all duration-300 ${activePreset?.id === p.id ? "bg-white text-black border-white shadow-[0_15px_30px_rgba(255,255,255,0.15)] z-10" : "bg-zinc-900/40 text-zinc-500 border-white/5 hover:border-white/20 hover:bg-zinc-800/60"}`}
+                                 >
+                                   <div className="flex items-start justify-between gap-3">
+                                     <div className="flex flex-col min-w-0">
+                                       <span className={`text-[8px] font-black uppercase tracking-widest mb-1 transition-colors ${activePreset?.id === p.id ? "text-zinc-600" : "text-zinc-500"}`}>
+                                         {p.category}
+                                       </span>
+                                       <span className={`text-[11px] font-bold truncate leading-none ${activePreset?.id === p.id ? "text-black" : "text-white"}`}>
+                                         {p.name}
+                                       </span>
+                                     </div>
+                                     <div className="flex items-center gap-1.5 shrink-0">
+                                       {p.id.startsWith("custom-p-") && (
+                                         <button
+                                           onClick={(e) => {
+                                             e.stopPropagation();
+                                             handleDeleteCustomPreset(p.id, p.name);
+                                           }}
+                                           className={`p-1 rounded-md transition-all hover:scale-105 ${activePreset?.id === p.id ? "text-red-600 hover:bg-red-500/10" : "text-zinc-500 hover:text-red-400 hover:bg-white/5"}`}
+                                           title="Delete Preset"
+                                         >
+                                           <Trash2 size={10} />
+                                         </button>
+                                       )}
+                                       {p.color && (
+                                         <div 
+                                           className="w-3 h-3 rounded-full border border-black/10 shadow-sm shrink-0" 
+                                           style={{ 
+                                             background: p.color,
+                                             boxShadow: activePreset?.id === p.id ? `0 0 10px ${p.color}44` : 'none'
+                                            }} 
+                                         />
+                                       )}
+                                     </div>
+                                   </div>
+                                   
+                                   {activePreset?.id === p.id && (
+                                     <motion.div 
+                                       layoutId="preset-active-indicator"
+                                       className="absolute -right-1 -top-1 w-5 h-5 bg-black text-white rounded-full flex items-center justify-center border-2 border-white shadow-xl"
+                                       initial={{ scale: 0 }}
+                                       animate={{ scale: 1 }}
+                                     >
+                                       <Check size={10} strokeWidth={4} />
+                                     </motion.div>
+                                   )}
+                                 </motion.button>
+                               </Tooltip>
+                             ))}
+                           </div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 </>
+               )}
             </div>
 
             <div className="flex flex-col items-center gap-6">
@@ -6576,6 +6944,57 @@ export default function App(): React.ReactElement {
                               </div>
                             </div>
                           </div>
+                        ) : isSliderView ? (
+                          <div className="relative flex items-center justify-center max-w-full max-h-full overflow-hidden rounded-2xl border border-white/5 bg-zinc-950/20 select-none group/slider">
+                            {/* Capa inferior (Fondo): Imagen Original uncorrected */}
+                            <img 
+                              src={(resultImage || sourceImage) || ""} 
+                              style={baseDisplayStyle} 
+                              className="max-w-full max-h-full object-contain drop-shadow-2xl transition-all duration-300 pointer-events-none" 
+                              loading="lazy"
+                            />
+                            
+                            {/* Capa superior: Imagen Procesada (Graded) with clipPath clipping */}
+                            <div 
+                              className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
+                              style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}
+                            >
+                              <img 
+                                src={(gradedImage || resultImage || sourceImage) || ""} 
+                                style={resultDisplayStyle} 
+                                className="max-w-full max-h-full object-contain drop-shadow-2xl transition-all duration-300 pointer-events-none" 
+                                loading="lazy"
+                              />
+                            </div>
+
+                            {/* Línea vertical divisoria animada */}
+                            <div 
+                              className="absolute top-0 bottom-0 w-0.5 bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.9)] pointer-events-none z-20 animate-pulse"
+                              style={{ left: `${sliderPosition}%` }}
+                            >
+                              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-zinc-950 border-2 border-amber-400 text-amber-400 flex items-center justify-center shadow-[0_0_15px_rgba(251,191,36,0.4)] pointer-events-none scale-100 group-hover/slider:scale-110 transition-transform">
+                                <ChevronsLeftRight size={14} className="text-amber-400" />
+                              </div>
+                            </div>
+
+                            {/* Etiquetas "Original" y "Procesado" */}
+                            <div className="absolute top-4 right-4 bg-zinc-950/80 backdrop-blur-xl border border-white/10 rounded-xl px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.2em] text-white/50 pointer-events-none z-20">
+                              Original
+                            </div>
+                            <div className="absolute top-4 left-4 bg-amber-500/10 backdrop-blur-xl border border-amber-500/20 rounded-xl px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.2em] text-amber-400 pointer-events-none z-20">
+                              Procesado
+                            </div>
+
+                            {/* Input range invisible para capturar el arrastre nativo */}
+                            <input 
+                              type="range" 
+                              min="0" 
+                              max="100" 
+                              value={sliderPosition} 
+                              onChange={(e) => setSliderPosition(Number(e.target.value))} 
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-30 font-sans" 
+                            />
+                          </div>
                         ) : (
                           <div className="relative flex items-center justify-center max-w-full max-h-full">
                             <img 
@@ -6685,11 +7104,28 @@ export default function App(): React.ReactElement {
                           </div>
                       </div>
                       <div className="absolute top-10 right-10 flex gap-4 opacity-100 transition-all transform translate-y-0">
+                        <Tooltip text={isSliderView ? "Desactivar Slider de Comparación" : "Activar Slider Deslizante Antes/Después"}>
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => {
+                              setIsSliderView(!isSliderView);
+                              if (isSplitView) setIsSplitView(false);
+                            }} 
+                            className={`flex flex-col items-center gap-1 p-4 backdrop-blur-xl rounded-2xl border transition-all shadow-2xl ${isSliderView ? 'bg-amber-400 text-black border-amber-400' : 'bg-black/80 text-white border-white/10 hover:bg-white/10'}`}
+                          >
+                            <ChevronsLeftRight size={22} />
+                            <span className="text-[8px] font-black uppercase tracking-widest">Slider</span>
+                          </motion.button>
+                        </Tooltip>
                         <Tooltip text={isSplitView ? "Desactivar Vista Dividida" : "Activar Vista Dividida"}>
                           <motion.button 
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            onClick={() => setIsSplitView(!isSplitView)} 
+                            onClick={() => {
+                              setIsSplitView(!isSplitView);
+                              if (isSliderView) setIsSliderView(false);
+                            }} 
                             className={`flex flex-col items-center gap-1 p-4 backdrop-blur-xl rounded-2xl border transition-all shadow-2xl ${isSplitView ? 'bg-indigo-500 text-white border-indigo-400' : 'bg-black/80 text-white border-white/10 hover:bg-white/10'}`}
                           >
                             <Columns size={22} />
