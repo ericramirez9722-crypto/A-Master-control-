@@ -101,6 +101,7 @@ import { Toaster, toast } from 'sonner';
 import { Mode, Preset, SyntergicDNA, BatchItem } from "./types";
 import { IMAGE_PRESETS } from "./constants";
 import { gemini } from "./services/geminiService";
+import JSZip from "jszip";
 
 // Enhanced Tooltip component supporting wide/detailed technical DNA strings
 const Tooltip = ({ children, text, wide = false, title }: { children?: React.ReactNode; text: string; wide?: boolean; title?: string; key?: React.Key }) => (
@@ -837,6 +838,8 @@ export default function App(): React.ReactElement {
   const [assetType, setAssetType] = useState<"icon" | "component" | "illustration">("icon");
   const [assetBackground, setAssetBackground] = useState<"isolated" | "gradient" | "scene">("isolated");
   const [exportSettings, setExportSettings] = useState({ format: 'png', quality: 90, filename: 'ia-studio-asset' });
+  const [sidecarFormat, setSidecarFormat] = useState<'json' | 'xmp'>('json');
+  const [autoExportSidecar, setAutoExportSidecar] = useState(false);
   const [showExportPanel, setShowExportPanel] = useState(false);
   const [surfaceDetail, setSurfaceDetail] = useState(1.0);
   const [materialType, setMaterialType] = useState("Metal");
@@ -1790,6 +1793,17 @@ export default function App(): React.ReactElement {
                 <p className="mt-4 text-[8px] text-center text-zinc-600 font-bold uppercase tracking-widest">
                   {batchQueue.filter(q => q.status === 'completed').length} de {batchQueue.length} completados
                 </p>
+                {batchQueue.some(q => q.status === 'completed') && (
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleDownloadAllCompleted}
+                    className="w-full mt-4 py-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg"
+                  >
+                    <Download size={12} />
+                    Descargar Completados (ZIP)
+                  </motion.button>
+                )}
               </div>
             </div>
 
@@ -3267,6 +3281,64 @@ export default function App(): React.ReactElement {
     toast.success("Procesamiento por lotes completado");
   };
 
+  const handleDownloadAllCompleted = async () => {
+    const completedItems = batchQueue.filter(item => item.status === 'completed' && item.result);
+    if (completedItems.length === 0) {
+      toast.error("No hay imágenes completadas para descargar");
+      return;
+    }
+
+    const zip = new JSZip();
+    addLog(`BATCH: PREPARANDO ZIP DE DESCARGA CON ${completedItems.length} IMÁGENES`);
+    toast.info(`Comprimiendo ${completedItems.length} imágenes...`);
+
+    try {
+      for (let i = 0; i < completedItems.length; i++) {
+        const item = completedItems[i];
+        const imageUrl = item.result!;
+        
+        let fileData: Blob | Uint8Array;
+        let ext = "png";
+
+        if (imageUrl.startsWith("data:image/")) {
+          const parts = imageUrl.split(",");
+          const mime = parts[0].match(/:(.*?);/)![1];
+          ext = mime.split("/")[1] || "png";
+          const binaryStr = atob(parts[1]);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let j = 0; j < len; j++) {
+            bytes[j] = binaryStr.charCodeAt(j);
+          }
+          fileData = bytes;
+        } else {
+          const response = await fetch(imageUrl);
+          fileData = await response.blob();
+          const mime = response.headers.get("content-type") || "image/png";
+          ext = mime.split("/")[1] || "png";
+        }
+
+        zip.file(`ia-studio-batch-${item.id}.${ext}`, fileData);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ia-studio-batch-${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      addLog("BATCH: ZIP DESCARGADO COMPLETAMENTE");
+      toast.success("¡Descarga de lote completada exitosamente!");
+    } catch (err: any) {
+      console.error("Error generating zip:", err);
+      toast.error("Error al generar el archivo ZIP: " + err.message);
+    }
+  };
+
   const handleExecution = async () => {
     // 💾 Save last action for potential retry
     lastActionRef.current = handleExecution;
@@ -3802,35 +3874,150 @@ export default function App(): React.ReactElement {
     }
   };
 
+  const applyVisualFiltersToCanvas = (canvas: HTMLCanvasElement) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    const hueAngle = ((grading.hue || 0) * Math.PI) / 180;
+    const cosH = Math.cos(hueAngle);
+    const sinH = Math.sin(hueAngle);
+    
+    const rX = 0.213, rY = 0.715, rZ = 0.072;
+    const m00 = rX + cosH * (1 - rX) + sinH * (-rX);
+    const m01 = rY + cosH * (-rY) + sinH * (-rY);
+    const m02 = rZ + cosH * (-rZ) + sinH * (1 - rZ);
+    
+    const m10 = rX + cosH * (-rX) + sinH * (0.143);
+    const m11 = rY + cosH * (1 - rY) + sinH * (0.140);
+    const m12 = rZ + cosH * (-rZ) + sinH * (-0.283);
+    
+    const m20 = rX + cosH * (-rX) + sinH * (-(1 - rX));
+    const m21 = rY + cosH * (-rY) + sinH * (rY);
+    const m22 = rZ + cosH * (1 - rZ) + sinH * (rZ);
+
+    const exponent = 1 - (grading.midtones || 0) / 200;
+    const amplitude = 1 + (grading.whites || 0) / 200;
+    const bias = (grading.blacks || 0) / 200;
+
+    const bMult = (filters.brightness || 100) / 100;
+    const cMult = (filters.contrast || 100) / 100;
+    const sMult = (filters.saturation || 100) / 100;
+
+    const shR = (grading.shadowsR || 0);
+    const shG = (grading.shadowsG || 0);
+    const shB = (grading.shadowsB || 0);
+
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i];
+      let g = data[i + 1];
+      let b = data[i + 2];
+
+      // A) Brightness
+      if (bMult !== 1) {
+        r *= bMult;
+        g *= bMult;
+        b *= bMult;
+      }
+
+      // B) Contrast
+      if (cMult !== 1) {
+        r = (r - 127.5) * cMult + 127.5;
+        g = (g - 127.5) * cMult + 127.5;
+        b = (b - 127.5) * cMult + 127.5;
+      }
+
+      // C) Saturation
+      if (sMult !== 1) {
+        const gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        r = gray + (r - gray) * sMult;
+        g = gray + (g - gray) * sMult;
+        b = gray + (b - gray) * sMult;
+      }
+
+      // D) Hue Rotate
+      if (grading.hue !== 0) {
+        const currR = r, currG = g, currB = b;
+        r = currR * m00 + currG * m01 + currB * m02;
+        g = currR * m10 + currG * m11 + currB * m12;
+        b = currR * m20 + currG * m21 + currB * m22;
+      }
+
+      // E) Advanced Color Grading offsets (Shadows R, G, B)
+      if (shR !== 0 || shG !== 0 || shB !== 0) {
+        r += shR;
+        g += shG;
+        b += shB;
+      }
+
+      // F) Advanced Component Transfer (Whites, Blacks, Midtones)
+      if (exponent !== 1 || amplitude !== 1 || bias !== 0) {
+        let rNorm = Math.max(0, r / 255);
+        let gNorm = Math.max(0, g / 255);
+        let bNorm = Math.max(0, b / 255);
+
+        rNorm = Math.pow(rNorm, exponent) * amplitude + bias;
+        gNorm = Math.pow(gNorm, exponent) * amplitude + bias;
+        bNorm = Math.pow(bNorm, exponent) * amplitude + bias;
+
+        r = rNorm * 255;
+        g = gNorm * 255;
+        b = bNorm * 255;
+      }
+
+      data[i] = Math.max(0, Math.min(255, r));
+      data[i + 1] = Math.max(0, Math.min(255, g));
+      data[i + 2] = Math.max(0, Math.min(255, b));
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  };
+
+  const getSafeImageSource = async (src: string): Promise<string> => {
+    if (src.startsWith("http://") || src.startsWith("https://")) {
+      try {
+        const response = await fetch(src, { mode: 'cors' });
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+      } catch (err) {
+        console.warn("CORS fetch failed for source:", src, err);
+      }
+    }
+    return src;
+  };
+
   const copyImageToClipboard = async () => {
     const target = gradedImage || resultImage || sourceImage;
     if (!target) return;
     
     addLog("CLIPBOARD: PREPARING BUFFER...");
     try {
-      // Create a hidden canvas to apply filters first
       const canvas = document.createElement('canvas');
       const img = new Image();
       img.crossOrigin = "anonymous";
       
+      const safeSrc = await getSafeImageSource(target);
       await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;
-        img.src = target;
+        img.src = safeSrc;
       });
 
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.filter = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) hue-rotate(${grading.hue}deg) url(#advanced-grading)`;
         ctx.drawImage(img, 0, 0);
+        applyVisualFiltersToCanvas(canvas);
         
         canvas.toBlob(async (blob) => {
           if (!blob) throw new Error("Blob creation failed");
           const item = new ClipboardItem({ "image/png": blob });
           await navigator.clipboard.write([item]);
           addLog("CLIPBOARD: ASSET COPIED SUCCESSFULLY (PNG)");
+          if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
         }, 'image/png');
       }
     } catch (err) {
@@ -3851,20 +4038,19 @@ export default function App(): React.ReactElement {
       const img = new Image();
       img.crossOrigin = "anonymous";
       
+      const safeSrc = await getSafeImageSource(target);
       await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;
-        img.src = target;
+        img.src = safeSrc;
       });
 
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        // Apply current filters first
-        ctx.filter = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) hue-rotate(${grading.hue}deg) url(#advanced-grading)`;
         ctx.drawImage(img, 0, 0);
-        ctx.filter = 'none';
+        applyVisualFiltersToCanvas(canvas);
 
         // Add Watermark Text
         const fontSize = Math.max(14, Math.floor(canvas.width / 45));
@@ -3909,6 +4095,7 @@ export default function App(): React.ReactElement {
         stopProgressSimulation("Asset integrity secured.");
         addLog("SECURITY: NEURAL WATERMARK BAKED AND VERIFIED");
         toast.success("Marca de agua inyectada", { description: "El activo ha sido marcado permanentemente con firmas neurales." });
+        if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
       }
     } catch (err) {
       console.error(err);
@@ -3925,85 +4112,225 @@ export default function App(): React.ReactElement {
 
     const canvas = document.createElement('canvas');
     const img = new Image();
-    
     img.crossOrigin = "anonymous";
     
-    img.onload = () => {
-      try {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d', { alpha: true });
-        if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.filter = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturation}%) hue-rotate(${grading.hue}deg) url(#advanced-grading)`;
-          ctx.drawImage(img, 0, 0);
-          
-          if (ethicalProtocol && provenanceData) {
-            ctx.filter = 'none';
-            ctx.font = `${Math.max(12, canvas.width / 60)}px monospace`;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.textAlign = 'right';
-            ctx.fillText(`AI GENERATED | ${provenanceData.generationId} | ${provenanceData.parameters.model}`, canvas.width - 20, canvas.height - 20);
+    try {
+      const safeSrc = await getSafeImageSource(target);
+      img.onload = () => {
+        try {
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d', { alpha: true });
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0);
+            applyVisualFiltersToCanvas(canvas);
             
-            ctx.globalAlpha = 0.05;
-            ctx.fillStyle = '#fff';
-            for (let i = 0; i < canvas.width; i += 100) {
-              for (let j = 0; j < canvas.height; j += 100) {
-                ctx.fillText('AI', i, j);
+            if (ethicalProtocol && provenanceData) {
+              ctx.font = `${Math.max(12, canvas.width / 60)}px monospace`;
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+              ctx.textAlign = 'right';
+              ctx.fillText(`AI GENERATED | ${provenanceData.generationId} | ${provenanceData.parameters.model}`, canvas.width - 20, canvas.height - 20);
+              
+              ctx.globalAlpha = 0.05;
+              ctx.fillStyle = '#fff';
+              for (let i = 0; i < canvas.width; i += 100) {
+                for (let j = 0; j < canvas.height; j += 100) {
+                  ctx.fillText('AI', i, j);
+                }
               }
+              ctx.globalAlpha = 1.0;
             }
-            ctx.globalAlpha = 1.0;
+
+            const mimeType = exportSettings.format === 'jpg' ? 'image/jpeg' : 
+                            exportSettings.format === 'webp' ? 'image/webp' : 
+                            'image/png';
+            
+            const quality = exportSettings.quality / 100;
+            const ext = exportSettings.format === 'jpg' ? 'jpg' : 
+                        exportSettings.format === 'webp' ? 'webp' : 
+                        'png';
+
+            canvas.toBlob((blob) => {
+              if (!blob) {
+                addLog("DOWNLOAD: BAKE FAILED - BLOB ERROR");
+                if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
+                return;
+              }
+              const url = URL.createObjectURL(blob);
+              
+              if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                // Mobile: Open in new tab for long-press save
+                const newWindow = window.open(url, '_blank');
+                if (!newWindow) {
+                  window.location.href = url;
+                }
+                addLog("DOWNLOAD: OPENED IN NEW TAB - LONG PRESS TO SAVE");
+              } else {
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${exportSettings.filename}-${Date.now()}.${ext}`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                addLog(`DOWNLOAD: ASSET BAKED SUCCESSFULLY [.${ext.toUpperCase()}]`);
+              }
+              
+              if (autoExportSidecar) {
+                setTimeout(() => {
+                  downloadSidecarMetadata(sidecarFormat);
+                }, 400);
+              }
+              
+              setTimeout(() => {
+                URL.revokeObjectURL(url);
+                if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
+              }, 60000);
+            }, mimeType, quality);
           }
-
-          const mimeType = exportSettings.format === 'jpg' ? 'image/jpeg' : 
-                          exportSettings.format === 'webp' ? 'image/webp' : 
-                          'image/png';
-          
-          const quality = exportSettings.quality / 100;
-          const ext = exportSettings.format === 'jpg' ? 'jpg' : 
-                      exportSettings.format === 'webp' ? 'webp' : 
-                      'png';
-
-          canvas.toBlob((blob) => {
-            if (!blob) {
-              addLog("DOWNLOAD: BAKE FAILED - BLOB ERROR");
-              return;
-            }
-            const url = URL.createObjectURL(blob);
-            
-            if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-              // Mobile: Open in new tab for long-press save
-              const newWindow = window.open(url, '_blank');
-              if (!newWindow) {
-                window.location.href = url;
-              }
-              addLog("DOWNLOAD: OPENED IN NEW TAB - LONG PRESS TO SAVE");
-            } else {
-              const link = document.createElement('a');
-              link.href = url;
-              link.download = `${exportSettings.filename}-${Date.now()}.${ext}`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-              addLog(`DOWNLOAD: ASSET BAKED SUCCESSFULLY [.${ext.toUpperCase()}]`);
-            }
-            
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
-          }, mimeType, quality);
+        } catch (e) {
+          console.error("Canvas bake failed, falling back to direct download", e);
+          if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
+          window.open(target, '_blank');
         }
-      } catch (e) {
-        console.error("Canvas bake failed, falling back to direct download", e);
+      };
+
+      img.onerror = () => {
+        console.error("Failed to load image for downloading");
+        if (safeSrc.startsWith("blob:")) URL.revokeObjectURL(safeSrc);
         window.open(target, '_blank');
+      };
+
+      img.src = safeSrc;
+    } catch (err) {
+      console.error("Error securing safe image source:", err);
+      window.open(target, '_blank');
+    }
+  };
+
+  const downloadSidecarMetadata = (formatType: 'json' | 'xmp') => {
+    const metadata = {
+      application: "IA Studio A+B Core Engine",
+      version: "3.5 Ultra-Synthesis",
+      timestamp: new Date().toISOString(),
+      provenance: provenanceData ? {
+        generationId: provenanceData.generationId,
+        engine: provenanceData.engine,
+        author: provenanceData.author,
+        securityHash: provenanceData.securityHash,
+        ipEvents: provenanceData.ipEvents
+      } : null,
+      syntergicParams: {
+        lambda: syntergicParams.lambda,
+        protocol: syntergicParams.protocol,
+        entropy: syntergicParams.entropy,
+      },
+      compositionParams: {
+        luxury,
+        realism,
+        mutation,
+        sceneDepth,
+        seed,
+        aspectRatio,
+        highQuality,
+        styleIntensity,
+        upscaleFactor,
+      },
+      prompts: {
+        prompt,
+        negativePrompt,
+      },
+      colorGrading: {
+        filters,
+        grading,
+        lutName: lutName || "Neural LUT",
+        lutIntensity: lutIntensity,
+        grainIntensity,
+      },
+      surfaceParams: {
+        surfaceDetail,
+        materialType,
+        isTiling,
       }
     };
 
-    img.onerror = () => {
-      console.error("Failed to load image for downloading");
-      window.open(target, '_blank');
-    };
+    let content = "";
+    let mimeType = "";
+    let fileExtension = "";
 
-    img.src = target;
+    if (formatType === 'json') {
+      content = JSON.stringify(metadata, null, 2);
+      mimeType = "application/json";
+      fileExtension = "json";
+    } else {
+      // Elegant XML structure for standard XMP sidecar
+      content = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:syntergic="http://ns.iastudio.com/syntergic/1.0/"
+    xmlns:color="http://ns.iastudio.com/color/1.0/">
+   <xmp:CreatorTool>IA Studio A+B Core Engine</xmp:CreatorTool>
+   <xmp:CreateDate>${metadata.timestamp}</xmp:CreateDate>
+   <dc:title>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">${exportSettings.filename}</rdf:li>
+    </rdf:Alt>
+   </dc:title>
+   <dc:description>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">${prompt ? prompt.replace(/[<>&'"]/g, '') : ""}</rdf:li>
+    </rdf:Alt>
+   </dc:description>
+   <syntergic:lambda>${syntergicParams.lambda}</syntergic:lambda>
+   <syntergic:protocol>${syntergicParams.protocol}</syntergic:protocol>
+   <syntergic:entropy>${syntergicParams.entropy}</syntergic:entropy>
+   <syntergic:luxury>${luxury}</syntergic:luxury>
+   <syntergic:realism>${realism}</syntergic:realism>
+   <syntergic:mutation>${mutation}</syntergic:mutation>
+   <syntergic:sceneDepth>${sceneDepth}</syntergic:sceneDepth>
+   <syntergic:seed>${seed}</syntergic:seed>
+   <syntergic:aspectRatio>${aspectRatio}</syntergic:aspectRatio>
+   <syntergic:styleIntensity>${styleIntensity}</syntergic:styleIntensity>
+   <syntergic:highQuality>${highQuality}</syntergic:highQuality>
+   <color:brightness>${filters.brightness}</color:brightness>
+   <color:contrast>${filters.contrast}</color:contrast>
+   <color:saturation>${filters.saturation}</color:saturation>
+   <color:hue>${grading.hue}</color:hue>
+   <color:shadowsR>${grading.shadowsR}</color:shadowsR>
+   <color:shadowsG>${grading.shadowsG}</color:shadowsG>
+   <color:shadowsB>${grading.shadowsB}</color:shadowsB>
+   <color:midtonesR>${grading.midtonesR}</color:midtonesR>
+   <color:midtonesG>${grading.midtonesG}</color:midtonesG>
+   <color:midtonesB>${grading.midtonesB}</color:midtonesB>
+   <color:highlightsR>${grading.highlightsR}</color:highlightsR>
+   <color:highlightsG>${grading.highlightsG}</color:highlightsG>
+   <color:highlightsB>${grading.highlightsB}</color:highlightsB>
+   <color:lutName>${lutName || "Neural LUT"}</color:lutName>
+   <color:lutIntensity>${lutIntensity}</color:lutIntensity>
+   <color:grainIntensity>${grainIntensity}</color:grainIntensity>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+      mimeType = "application/rdf+xml";
+      fileExtension = "xmp";
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${exportSettings.filename ?? 'ia-studio-asset'}.${fileExtension}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    addLog(`EXPORT: SIDECAR METADATA EXPORTED AS [.${fileExtension.toUpperCase()}]`);
+    toast.success(`Metadatos exportados exitosamente como .${fileExtension}`);
   };
 
   if (hasKey === null) return <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center"><Activity className="text-[var(--text-primary)] animate-pulse" size={48} /></div>;
@@ -7299,6 +7626,42 @@ export default function App(): React.ReactElement {
                                         <span className="text-[9px] font-bold text-indigo-300 uppercase">Copy IMG</span>
                                       </button>
                                     </div>
+                                  </div>
+
+                                  <div className="pt-3 border-t border-white/5 space-y-2">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <FileCode size={10} className="text-amber-400" />
+                                      <span className="text-[8px] font-black uppercase tracking-widest text-zinc-500">Metadatos Sidecar (ADN)</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {['json', 'xmp'].map(fmt => (
+                                        <button
+                                          key={fmt}
+                                          type="button"
+                                          onClick={() => setSidecarFormat(fmt as any)}
+                                          className={`py-1.5 rounded-lg text-[9px] font-black uppercase border transition-all ${sidecarFormat === fmt ? 'bg-amber-400 text-black border-amber-400' : 'bg-white/5 text-zinc-500 border-white/5 hover:border-white/10'}`}
+                                        >
+                                          {fmt}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="flex items-center justify-between py-1 px-1">
+                                      <span className="text-[8px] font-bold text-zinc-400 uppercase">Auto-exportar con imagen</span>
+                                      <input 
+                                        type="checkbox"
+                                        checked={autoExportSidecar}
+                                        onChange={e => setAutoExportSidecar(e.target.checked)}
+                                        className="rounded border-white/10 bg-white/5 text-amber-500 focus:ring-0 outline-none h-3 w-3 accent-amber-400"
+                                      />
+                                    </div>
+                                    <button 
+                                      type="button"
+                                      onClick={() => downloadSidecarMetadata(sidecarFormat)}
+                                      className="w-full py-1.5 bg-white/5 hover:bg-white/10 text-amber-400 rounded-lg text-[8px] font-black uppercase tracking-widest border border-amber-400/20 hover:border-amber-400/40 transition-all flex items-center justify-center gap-1.5"
+                                    >
+                                      <Download size={10} />
+                                      Descargar Sidecar .{sidecarFormat.toUpperCase()}
+                                    </button>
                                   </div>
 
                                   <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
