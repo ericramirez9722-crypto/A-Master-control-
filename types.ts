@@ -14,6 +14,7 @@ export interface Preset {
   category: "Hyperrealism" | "Luxury" | "Exotic" | "Material" | "Cinematic" | "Custom";
   color?: string; // Hex or CSS gradient for subtle background elements
   baseDNA?: SyntergicDNA;
+  thumbnail?: string;
 }
 
 export interface GenerationState {
