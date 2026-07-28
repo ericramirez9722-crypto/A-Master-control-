@@ -203,14 +203,16 @@ export class GeminiService {
     operationId: string, 
     fn: (signal: AbortSignal) => Promise<T>, 
     isPro: boolean = false,
-    silentOnFail: boolean = false
+    silentOnFail: boolean = false,
+    customTimeoutMs?: number,
+    customMaxRetries?: number
   ): Promise<T> {
     return retryManager({
       operationId,
       fn,
-      maxRetries: 3,
-      baseDelay: 2000,
-      timeoutMs: isPro ? 60000 : 30000, // Increased timeout for heavy visual tasks
+      maxRetries: customMaxRetries ?? 3,
+      baseDelay: 1500,
+      timeoutMs: customTimeoutMs ?? (isPro ? 60000 : 30000), // Increased timeout for heavy visual tasks
       onRetry: this.onRetryCallback,
       silentOnFail,
       onFail: (error) => {
@@ -319,7 +321,7 @@ export class GeminiService {
     };
 
     try {
-      const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+      const primaryModel = highQuality ? 'gemini-3.1-flash-image' : 'gemini-3.1-flash-lite-image';
       return await callGenerate(primaryModel, highQuality, true);
     } catch (err: any) {
       const msg = (err?.message || "").toUpperCase();
@@ -327,7 +329,7 @@ export class GeminiService {
       const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("MISSING_DATA") || msg.includes("LOCKED") || msg.includes("NOT_FOUND") || status === 403;
       
       if (isPermissionErr) {
-        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        const fallback = highQuality ? 'gemini-3.1-flash-lite-image' : 'gemini-3.1-flash-image';
         console.warn(`[GEMINI_SERVICE] Primary model failed (${msg.slice(0, 50)}...). Attempting fallback to ${fallback}.`);
         try {
           return await callGenerate(fallback, false, false);
@@ -409,7 +411,7 @@ export class GeminiService {
     };
 
     try {
-      const primaryModel = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+      const primaryModel = highQuality ? 'gemini-3.1-flash-image' : 'gemini-3.1-flash-lite-image';
       return await callEdit(primaryModel, highQuality, true);
     } catch (err: any) {
       const msg = (err?.message || "").toUpperCase();
@@ -417,7 +419,7 @@ export class GeminiService {
       const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("NOT_FOUND") || msg.includes("LOCKED") || status === 403;
 
       if (isPermissionErr) {
-        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        const fallback = highQuality ? 'gemini-3.1-flash-lite-image' : 'gemini-3.1-flash-image';
         console.warn(`[GEMINI_SERVICE] Edit fallback to ${fallback} due to: ${msg.slice(0, 30)}`);
         try {
           return await callEdit(fallback, false, false);
@@ -451,7 +453,7 @@ TECHNICAL MANDATE:
 - NO TEXT. NO PREAMBLE.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3.1-flash-lite-image',
         contents: {
           parts: [
             { inlineData: { data: cleanImg, mimeType: 'image/png' } },
@@ -618,7 +620,7 @@ TECHNICAL MANDATE:
 - NO TEXTUAL FEEDBACK.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3.1-flash-lite-image',
         contents: {
           parts: [
             { inlineData: { data: cleanContent, mimeType: 'image/png' } },
@@ -720,7 +722,7 @@ TECHNICAL MANDATE:
     };
 
     try {
-      const primaryModel = 'gemini-3.1-flash-image-preview';
+      const primaryModel = 'gemini-3.1-flash-image';
       return await callUpscale(primaryModel, true, true);
     } catch (err: any) {
       const msg = (err?.message || JSON.stringify(err) || "").toUpperCase();
@@ -728,7 +730,7 @@ TECHNICAL MANDATE:
       const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("FORBIDDEN") || msg.includes("ALLOW") || msg.includes("KEY_INVALID") || msg.includes("NOT_FOUND") || msg.includes("LOCKED") || status === 403;
       
       if (isPermissionErr) {
-        const fallback = 'gemini-2.5-flash-image';
+        const fallback = 'gemini-3.1-flash-lite-image';
         console.warn(`[GEMINI_SERVICE] Upscale fallback to ${fallback} due to: ${msg.slice(0, 50)}`);
         try {
           return await callUpscale(fallback, false, true);
@@ -794,7 +796,7 @@ TECHNICAL MANDATE:
       contentsParts.push({ text: prompt });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3.1-flash-lite-image',
         contents: { parts: contentsParts },
         config: {
           systemInstruction: SYSTEM_CORE_INSTRUCTIONS + "\nCRITICAL: You are a secure neural watermarking engine. Output ONLY the modified image binary data. No text.",
@@ -817,34 +819,46 @@ TECHNICAL MANDATE:
   async parseIntent(prompt: string): Promise<string> {
     if (this.intentCache.has(prompt)) return this.intentCache.get(prompt)!;
 
-    return this.executeNeuralOperation(`parse-intent-${prompt.slice(0, 10)}`, async (signal) => {
-      const ai = this.getClient();
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: {
-          parts: [{ text: `
-            ACT AS: Syntergic Intent Parser (Λ-Layer).
-            TASK: Translate the following raw user intent into a structured, high-fidelity visual description for a professional image generator.
-            
-            RAW INTENT: "${prompt}"
-            
-            OUTPUT FORMAT:
-            Environment: [Hyper-detailed description of the setting, including atmospheric conditions]
-            Style: [Specific aesthetic, mood, and artistic/cinematic references]
-            Lighting: [Technical optical details: PBR, global illumination, light sources, shadows]
-            Density: [Complexity level, micro-textures, and material properties]
-            Perspective: [Camera angle, lens type (e.g., 35mm, 85mm), framing, and depth of field]
-            
-            Keep it professional, editorial, and hyper-detailed. Use technical terminology from photography and CGI rendering.
-          ` }],
+    try {
+      return await this.executeNeuralOperation(
+        `parse-intent-${prompt.slice(0, 10)}`,
+        async (signal) => {
+          const ai = this.getClient();
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.5-flash',
+            contents: {
+              parts: [{ text: `
+                ACT AS: Syntergic Intent Parser (Λ-Layer).
+                TASK: Translate the following raw user intent into a structured, high-fidelity visual description for a professional image generator.
+                
+                RAW INTENT: "${prompt}"
+                
+                OUTPUT FORMAT:
+                Environment: [Hyper-detailed description of the setting, including atmospheric conditions]
+                Style: [Specific aesthetic, mood, and artistic/cinematic references]
+                Lighting: [Technical optical details: PBR, global illumination, light sources, shadows]
+                Density: [Complexity level, micro-textures, and material properties]
+                Perspective: [Camera angle, lens type (e.g., 35mm, 85mm), framing, and depth of field]
+                
+                Keep it professional, editorial, and hyper-detailed. Use technical terminology from photography and CGI rendering.
+              ` }],
+            },
+            config: { systemInstruction: SYSTEM_CORE_INSTRUCTIONS }
+          });
+          this.validateResponse(response, "parseIntent");
+          const res = response.text || prompt;
+          this.intentCache.set(prompt, res);
+          return res;
         },
-        config: { systemInstruction: SYSTEM_CORE_INSTRUCTIONS }
-      });
-      this.validateResponse(response, "parseIntent");
-      const res = response.text || prompt;
-      this.intentCache.set(prompt, res);
-      return res;
-    });
+        false, // isPro
+        true,  // silentOnFail
+        15000, // customTimeoutMs: 15s for text intent parsing
+        2      // customMaxRetries: 2
+      );
+    } catch (err) {
+      console.warn("[GEMINI_SERVICE] parseIntent failed or timed out. Falling back to raw user prompt:", err);
+      return prompt;
+    }
   }
 
   async syntergicGenerate(
@@ -856,7 +870,7 @@ TECHNICAL MANDATE:
     aspectRatio: string = "1:1",
     negativePrompt?: string
   ): Promise<string[]> {
-    const modelName = highQuality ? 'gemini-3.1-flash-image-preview' : 'gemini-2.5-flash-image';
+    const modelName = highQuality ? 'gemini-3.1-flash-image' : 'gemini-3.1-flash-lite-image';
     
     // Λ - Coherence Layer: Parse intent first if lambda is high
     const structuredPrompt = params.lambda > 50 ? await this.parseIntent(prompt) : prompt;
@@ -940,7 +954,7 @@ TECHNICAL MANDATE:
       const status = err?.status || err?.statusCode || err?.code || "";
       const isPermissionErr = msg.includes("PERMISSION") || msg.includes("403") || msg.includes("NOT_FOUND") || status === 403;
       if (isPermissionErr) {
-        const fallback = highQuality ? 'gemini-2.5-flash-image' : 'gemini-3.1-flash-image-preview';
+        const fallback = highQuality ? 'gemini-3.1-flash-lite-image' : 'gemini-3.1-flash-image';
         return await callSyntergic(fallback, false);
       }
       throw err;
@@ -967,7 +981,7 @@ TECHNICAL MANDATE:
     return this.executeNeuralOperation('prompt-enhancement', async (signal) => {
       const ai = this.getClient();
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         contents: {
           parts: [{ text: `
             ACT AS: Professional Prompt Engineer & Visual Consultant.
@@ -1045,7 +1059,7 @@ TECHNICAL MANDATE:
     return this.executeNeuralOperation('text-completion', async (signal) => {
       const ai = this.getClient();
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         contents: [{ parts: [{ text: prompt }] }],
       });
       this.validateResponse(response, "generateText");

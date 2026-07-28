@@ -100,12 +100,18 @@ import {
   Microscope,
   Save,
   ChevronsLeftRight,
+  LayoutTemplate,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from "sonner";
 import { Mode, Preset, SyntergicDNA, BatchItem } from "./types";
 import { IMAGE_PRESETS } from "./constants";
 import { gemini } from "./services/geminiService";
+import { SpatialFrequencySpectrum } from "./SpatialFrequencySpectrum";
+import {
+  PromptShortcutsBar,
+  PromptTemplateManagerModal,
+} from "./PromptTemplateSystem";
 import JSZip from "jszip";
 
 // Enhanced Tooltip component supporting wide/detailed technical DNA strings
@@ -1097,6 +1103,21 @@ export default function App(): React.ReactElement {
   const [sidecarFormat, setSidecarFormat] = useState<"json" | "xmp">("json");
   const [autoExportSidecar, setAutoExportSidecar] = useState(false);
   const [showExportPanel, setShowExportPanel] = useState(false);
+  const [showFrequencySpectrum, setShowFrequencySpectrum] = useState(false);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+
+  const handleInjectPrompt = (text: string, mode: "replace" | "append") => {
+    if (mode === "replace") {
+      setPrompt(text);
+    } else {
+      setPrompt((prev) =>
+        prev.trim() ? `${prev.trim()}, ${text.trim()}` : text.trim()
+      );
+    }
+    toast.success("Estructura de prompt inyectada", {
+      description: "Plantilla lista en el área de prompt.",
+    });
+  };
   const [surfaceDetail, setSurfaceDetail] = useState(1.0);
   const [materialType, setMaterialType] = useState("Metal");
   const [isTiling, setIsTiling] = useState(true);
@@ -6176,8 +6197,8 @@ export default function App(): React.ReactElement {
         )}
       </AnimatePresence>
 
-      <div className="max-w-7xl w-full space-y-8">
-        <header className="flex flex-col items-center space-y-4 mb-4 sm:mb-8 w-full px-2">
+      <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 flex flex-col gap-6">
+        <header className="flex flex-col items-center gap-4 w-full">
           <div className="flex flex-wrap justify-center items-center gap-2 sm:gap-4 overflow-x-auto sm:overflow-visible w-full sm:w-auto px-2 py-2 no-scrollbar">
             <Tooltip text="Información del Proyecto y Visión">
               <button
@@ -6446,150 +6467,82 @@ export default function App(): React.ReactElement {
 
         <nav
           id="mode-selector"
-          className="flex justify-center w-full px-4 mb-16"
+          className="w-full my-2"
         >
-          <div className="w-full max-w-2xl bg-zinc-900/40 rounded-[3rem] border border-white/5 backdrop-blur-3xl p-8 sm:p-10 flex flex-col gap-8 shadow-2xl relative group-nav">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 blur-[120px] -z-10 group-hover:bg-amber-500/10 transition-all duration-700" />
+          <div className="w-full bg-zinc-900/50 rounded-3xl sm:rounded-[2.5rem] border border-white/10 backdrop-blur-3xl p-5 sm:p-7 flex flex-col gap-5 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 blur-[120px] -z-10 transition-all duration-700" />
 
             {[
               {
-                group: "Creation",
+                group: "Creación",
                 modes: [
-                  {
-                    id: "generate",
-                    icon: <Sparkles size={16} />,
-                    tip: "Creación Neural desde Instrucciones",
-                  },
-                  {
-                    id: "concept",
-                    icon: <Palette size={16} />,
-                    tip: "Arte Conceptual y World-building",
-                  },
-                  {
-                    id: "worldbuilding",
-                    icon: <Monitor size={16} />,
-                    tip: "Generación de Universos Visuales Coherentes",
-                  },
-                  {
-                    id: "mockup",
-                    icon: <Box size={16} />,
-                    tip: "Generación de Mockups Profesionales",
-                  },
-                  {
-                    id: "asset",
-                    icon: <Layout size={16} />,
-                    tip: "Creación de Assets y UI",
-                  },
-                  {
-                    id: "texture",
-                    icon: <Spline size={16} />,
-                    tip: "Generación de Texturas y Materiales Técnicos",
-                  },
+                  { id: "generate", label: "Generar", icon: <Sparkles size={15} />, tip: "Creación Neural desde Instrucciones" },
+                  { id: "concept", label: "Concepto", icon: <Palette size={15} />, tip: "Arte Conceptual y World-building" },
+                  { id: "worldbuilding", label: "Mundo", icon: <Monitor size={15} />, tip: "Generación de Universos Visuales Coherentes" },
+                  { id: "mockup", label: "Mockup", icon: <Box size={15} />, tip: "Generación de Mockups Profesionales" },
+                  { id: "asset", label: "Assets", icon: <Layout size={15} />, tip: "Creación de Assets y UI" },
+                  { id: "texture", label: "Textura", icon: <Spline size={15} />, tip: "Generación de Texturas y Materiales Técnicos" },
                 ],
               },
               {
-                group: "Editing",
+                group: "Edición",
                 modes: [
-                  {
-                    id: "edit",
-                    icon: <Brush size={16} />,
-                    tip: "Alteración Estructural de Imágenes",
-                  },
-                  {
-                    id: "inpaint",
-                    icon: <Scan size={16} />,
-                    tip: "Regeneración Localizada mediante Máscaras",
-                  },
-                  {
-                    id: "color-grading",
-                    icon: <Contrast size={16} />,
-                    tip: "Corrección de Color y Etalonaje Digital",
-                  },
-                  {
-                    id: "style-transfer",
-                    icon: <Wand2 size={16} />,
-                    tip: "Transferencia de Estilo Artístico Neural",
-                  },
-                  {
-                    id: "upscale",
-                    icon: <Maximize size={16} />,
-                    tip: "Aumento de Resolución y Detalle mediante IA",
-                  },
+                  { id: "edit", label: "Editar", icon: <Brush size={15} />, tip: "Alteración Estructural de Imágenes" },
+                  { id: "inpaint", label: "Inpaint", icon: <Scan size={15} />, tip: "Regeneración Localizada mediante Máscaras" },
+                  { id: "color-grading", label: "Color", icon: <Contrast size={15} />, tip: "Corrección de Color y Etalonaje Digital" },
+                  { id: "style-transfer", label: "Estilo", icon: <Wand2 size={15} />, tip: "Transferencia de Estilo Artístico Neural" },
+                  { id: "upscale", label: "Upscale", icon: <Maximize size={15} />, tip: "Aumento de Resolución y Detalle mediante IA" },
                 ],
               },
               {
-                group: "Advanced",
+                group: "Avanzado",
                 modes: [
-                  {
-                    id: "vision",
-                    icon: <Eye size={16} />,
-                    tip: "Descodificación y Análisis de Assets",
-                  },
-                  {
-                    id: "evolution",
-                    icon: <Activity size={16} />,
-                    tip: "Refinamiento Iterativo de ADN Visual",
-                  },
-                  {
-                    id: "dataset",
-                    icon: <FileCode size={16} />,
-                    tip: "Generación de Datasets Visuales",
-                  },
+                  { id: "vision", label: "Visión", icon: <Eye size={15} />, tip: "Descodificación y Análisis de Assets" },
+                  { id: "evolution", label: "Evolución", icon: <Activity size={15} />, tip: "Refinamiento Iterativo de ADN Visual" },
+                  { id: "dataset", label: "Dataset", icon: <FileCode size={15} />, tip: "Generación de Datasets Visuales" },
                 ],
               },
             ].map((group) => (
               <div
                 key={group.group}
-                className="flex flex-col sm:flex-row items-center gap-4 sm:gap-10"
+                className="flex flex-col md:flex-row items-start md:items-center gap-3 md:gap-6 pb-4 border-b border-white/5 last:pb-0 last:border-b-0"
               >
-                <span className="w-full sm:w-24 text-[8px] sm:text-[9px] font-black text-zinc-600 uppercase tracking-[0.4em] select-none text-center sm:text-right shrink-0">
+                <span className="w-24 text-[10px] font-black text-zinc-500 uppercase tracking-[0.25em] select-none shrink-0">
                   {group.group}
                 </span>
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6">
-                  {group.modes.map((m) => (
-                    <Tooltip key={m.id} text={m.tip}>
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => handleModeChange(m.id as Mode)}
-                        className={`p-3 rounded-2xl transition-all flex items-center gap-3 relative group-btn ${
-                          mode === m.id
-                            ? "bg-white text-black shadow-[0_20px_50px_rgba(255,255,255,0.2)]"
-                            : "text-zinc-500 hover:text-white"
-                        }`}
-                      >
-                        {m.icon}
-                        {mode === m.id && (
-                          <motion.span
-                            initial={{ opacity: 0, x: -5 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="text-[9px] font-black uppercase tracking-widest whitespace-nowrap"
-                          >
-                            {m.id.replace("-", " ")}
-                          </motion.span>
-                        )}
-                        {mode === m.id && (
-                          <motion.div
-                            layoutId="active-mode-pill"
-                            className="absolute inset-0 bg-white rounded-2xl -z-10"
-                            transition={{
-                              type: "spring",
-                              bounce: 0.2,
-                              duration: 0.6,
-                            }}
-                          />
-                        )}
-                      </motion.button>
-                    </Tooltip>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full">
+                  {group.modes.map((m) => {
+                    const isActive = mode === m.id;
+                    return (
+                      <Tooltip key={m.id} text={m.tip}>
+                        <motion.button
+                          whileHover={{ scale: 1.04 }}
+                          whileTap={{ scale: 0.96 }}
+                          onClick={() => handleModeChange(m.id as Mode)}
+                          className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 relative border ${
+                            isActive
+                              ? "bg-white text-black border-white shadow-[0_10px_30px_rgba(255,255,255,0.2)]"
+                              : "bg-white/[0.03] text-zinc-400 hover:text-white border-white/10 hover:border-white/20 hover:bg-white/[0.07]"
+                          }`}
+                        >
+                          <span className={isActive ? "text-black" : "text-amber-400/80"}>
+                            {m.icon}
+                          </span>
+                          <span className="uppercase tracking-wider text-[10px] font-black whitespace-nowrap">
+                            {m.label}
+                          </span>
+                        </motion.button>
+                      </Tooltip>
+                    );
+                  })}
                 </div>
               </div>
             ))}
           </div>
         </nav>
 
-        <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 w-full max-w-7xl">
-          <section className="order-last lg:order-first lg:col-span-5 space-y-6">
+        <main className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full max-w-7xl">
+          <section className="order-last lg:order-first lg:col-span-5 flex flex-col gap-6">
             <div className="space-y-4">
               <div className="flex justify-between items-center px-2">
                 <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-secondary)]">
@@ -8449,10 +8402,11 @@ export default function App(): React.ReactElement {
               </div>
             )}
 
-            <div className="space-y-3">
-              <div className="flex justify-between items-center px-2">
+            <div className="bg-zinc-900/50 rounded-3xl border border-white/10 p-5 sm:p-6 space-y-5 shadow-xl">
+              <div className="flex flex-wrap justify-between items-center gap-2 pb-3 border-b border-white/10">
                 <div className="flex items-center gap-3">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                  <label className="text-[10px] font-black text-zinc-300 uppercase tracking-widest flex items-center gap-2">
+                    <Sparkles size={13} className="text-amber-400" />
                     Neural Intent Prompt
                   </label>
                   <button
@@ -8462,7 +8416,7 @@ export default function App(): React.ReactElement {
                         `NEURAL MODE: ${!neuralMode ? "ACTIVATED" : "DEACTIVATED"}`,
                       );
                     }}
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${neuralMode ? "bg-amber-400/10 border-amber-400/30 text-amber-400" : "bg-white/5 border-white/10 text-zinc-500"}`}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${neuralMode ? "bg-amber-400/10 border-amber-400/30 text-amber-400" : "bg-white/5 border-white/10 text-zinc-500 hover:text-zinc-300"}`}
                   >
                     <div
                       className={`w-1.5 h-1.5 rounded-full ${neuralMode ? "bg-amber-400 animate-pulse" : "bg-zinc-600"}`}
@@ -8476,7 +8430,7 @@ export default function App(): React.ReactElement {
                   <button
                     onClick={handleSuggestEnhancements}
                     disabled={isSuggesting || !prompt || prompt.length < 5}
-                    className="flex items-center gap-2 text-[9px] font-black text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-30 uppercase tracking-widest"
+                    className="flex items-center gap-1.5 text-[9px] font-black text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-30 uppercase tracking-widest"
                   >
                     {isSuggesting ? (
                       <Loader2 className="animate-spin" size={12} />
@@ -8488,7 +8442,7 @@ export default function App(): React.ReactElement {
                   <button
                     onClick={runSAF}
                     disabled={!!neuralProgress || !prompt || prompt.length < 5}
-                    className="flex items-center gap-2 text-[9px] font-black text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-30 uppercase tracking-widest pl-3 border-l border-white/10"
+                    className="flex items-center gap-1.5 text-[9px] font-black text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-30 uppercase tracking-widest pl-3 border-l border-white/10"
                   >
                     {neuralProgress ? (
                       <Loader2 className="animate-spin" size={12} />
@@ -8499,10 +8453,11 @@ export default function App(): React.ReactElement {
                   </button>
                 </div>
               </div>
-              <div className="flex gap-4">
+
+              <div className="flex flex-col sm:flex-row gap-4 w-full">
                 {mode === "inpaint" && maskPreview && (
                   <div className="relative group shrink-0">
-                    <div className="w-32 h-32 rounded-3xl overflow-hidden border border-white/10 bg-black/40 relative">
+                    <div className="w-28 h-28 rounded-2xl overflow-hidden border border-white/10 bg-black/40 relative">
                       <img
                         src={maskPreview}
                         className="w-full h-full object-contain"
@@ -8510,7 +8465,7 @@ export default function App(): React.ReactElement {
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-center pb-2">
                         <span className="text-[8px] font-black text-white uppercase tracking-widest">
-                          Mascara
+                          Máscara
                         </span>
                       </div>
                     </div>
@@ -8524,147 +8479,186 @@ export default function App(): React.ReactElement {
                     </Tooltip>
                   </div>
                 )}
-                <div className="relative group flex-1">
-                  <div className="absolute top-2 left-6 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => applyFormatting("bold", "prompt")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Bold"
-                    >
-                      <Bold size={12} />
-                    </button>
-                    <button
-                      onClick={() => applyFormatting("italic", "prompt")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Italic"
-                    >
-                      <Italic size={12} />
-                    </button>
-                    <button
-                      onClick={() => applyFormatting("code", "prompt")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Code Block"
-                    >
-                      <Code size={12} />
-                    </button>
-                  </div>
-                  <Tooltip text="Describe la visión final: iluminación, materiales, composición y estética">
-                    <textarea
-                      id="prompt-area"
-                      ref={promptRef}
-                      value={prompt}
-                      onChange={(e) => {
-                        if (e.target.value.length <= MAX_PROMPT_LENGTH) {
-                          setPrompt(e.target.value);
-                          if (promptSuggestions) setPromptSuggestions(null);
-                        }
-                      }}
-                      onInput={(e) => {
-                        const target = e.target as HTMLTextAreaElement;
-                        target.style.height = "auto";
-                        target.style.height = `${Math.max(128, target.scrollHeight)}px`;
-                      }}
-                      className={`w-full min-h-[128px] h-32 bg-[var(--bg-secondary)]/60 rounded-3xl p-6 pt-10 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-[var(--text-secondary)] ${prompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-[var(--border-primary)] focus:border-[var(--border-primary)]"}`}
-                      placeholder={
-                        mode === "inpaint"
-                          ? "Describe el objeto o textura a sintetizar en el área marcada..."
-                          : "Especifique el núcleo creativo..."
-                      }
-                    />
-                  </Tooltip>
+                <div className="relative group flex-1 space-y-4 w-full">
+                  <PromptShortcutsBar
+                    currentPrompt={prompt}
+                    onInjectPrompt={handleInjectPrompt}
+                    onOpenManager={() => setShowTemplateManager(true)}
+                  />
 
-                  <div className="absolute top-4 right-4 flex gap-2">
-                    <Tooltip text="Óptica Cinemática: Inyecta iluminación dramática, composición cinematográfica y profundidad de campo (Bokeh)">
-                      <motion.button
-                        whileHover={{ scale: 1.1, rotate: 10 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={injectCinematicOptics}
-                        className="p-2 rounded-xl border bg-black/80 text-amber-400 border-white/10 hover:border-amber-400/50 hover:bg-black transition-all shadow-xl"
+                  {/* Main Creative Prompt Box */}
+                  <div className="space-y-1.5 w-full">
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                        Prompt Principal
+                      </span>
+                      <span
+                        className={`text-[9px] font-mono font-bold uppercase ${prompt.length >= MAX_PROMPT_LENGTH ? "text-red-400" : "text-zinc-500"}`}
                       >
-                        <Film size={14} />
-                      </motion.button>
-                    </Tooltip>
-                    <Tooltip text="Física Neural: Inyecta micro-detalle y propiedades físicas de materiales (Luces, Texturas, SSS)">
-                      <motion.button
-                        whileHover={{ scale: 1.1, rotate: -10 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={injectNeuralPhysics}
-                        className="p-2 rounded-xl border bg-black/80 text-emerald-400 border-white/10 hover:border-emerald-400/50 hover:bg-black transition-all shadow-xl"
-                      >
-                        <Microscope size={14} />
-                      </motion.button>
-                    </Tooltip>
-                    <Tooltip text="AI Suggest: Mejora tu prompt con terminología técnica y keywords (Neural Engine)">
-                      <motion.button
-                        whileHover={{ scale: 1.1, rotate: 5 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={handleSuggestEnhancements}
-                        disabled={isSuggesting || prompt.length < 5}
-                        className={`p-2 rounded-xl border transition-all shadow-xl ${isSuggesting ? "bg-amber-500 text-black border-amber-400 animate-pulse" : "bg-black/80 text-amber-400 border-white/10 hover:border-amber-400/50 hover:bg-black"}`}
-                      >
-                        {isSuggesting ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <Wand2 size={14} />
-                        )}
-                      </motion.button>
-                    </Tooltip>
+                        {prompt.length} / ∞
+                      </span>
+                    </div>
+
+                    <div className="relative group w-full">
+                      {/* Formatting tools */}
+                      <div className="absolute top-2.5 left-3 flex items-center gap-1 z-10 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
+                        <button
+                          onClick={() => applyFormatting("bold", "prompt")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Bold"
+                        >
+                          <Bold size={11} />
+                        </button>
+                        <button
+                          onClick={() => applyFormatting("italic", "prompt")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Italic"
+                        >
+                          <Italic size={11} />
+                        </button>
+                        <button
+                          onClick={() => applyFormatting("code", "prompt")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Code Block"
+                        >
+                          <Code size={11} />
+                        </button>
+                      </div>
+
+                      {/* Top Right Quick Inject Action Icons */}
+                      <div className="absolute top-2.5 right-3 flex items-center gap-1 z-10">
+                        <Tooltip text="Plantillas de Prompt">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => setShowTemplateManager(true)}
+                            className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-amber-400 border border-white/10 hover:border-amber-400/40 transition-all shadow-md"
+                          >
+                            <LayoutTemplate size={13} />
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="Óptica Cinemática">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={injectCinematicOptics}
+                            className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-amber-400 border border-white/10 hover:border-amber-400/40 transition-all shadow-md"
+                          >
+                            <Film size={13} />
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="Física Neural">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={injectNeuralPhysics}
+                            className="p-1.5 rounded-lg bg-black/70 hover:bg-black text-emerald-400 border border-white/10 hover:border-emerald-400/40 transition-all shadow-md"
+                          >
+                            <Microscope size={13} />
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="AI Suggest">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleSuggestEnhancements}
+                            disabled={isSuggesting || prompt.length < 5}
+                            className={`p-1.5 rounded-lg border transition-all shadow-md ${isSuggesting ? "bg-amber-500 text-black border-amber-400 animate-pulse" : "bg-black/70 hover:bg-black text-amber-400 border-white/10 hover:border-amber-400/40"}`}
+                          >
+                            {isSuggesting ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Wand2 size={13} />
+                            )}
+                          </motion.button>
+                        </Tooltip>
+                      </div>
+
+                      <Tooltip text="Describe la visión final: iluminación, materiales, composición y estética">
+                        <textarea
+                          id="prompt-area"
+                          ref={promptRef}
+                          value={prompt}
+                          onChange={(e) => {
+                            if (e.target.value.length <= MAX_PROMPT_LENGTH) {
+                              setPrompt(e.target.value);
+                              if (promptSuggestions) setPromptSuggestions(null);
+                            }
+                          }}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement;
+                            target.style.height = "auto";
+                            target.style.height = `${Math.max(110, target.scrollHeight)}px`;
+                          }}
+                          className={`w-full min-h-[110px] bg-black/30 rounded-2xl p-4 pt-10 pr-36 text-sm font-normal text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-zinc-500 leading-relaxed ${prompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-white/10 focus:border-amber-400/40 focus:bg-black/50"}`}
+                          placeholder={
+                            mode === "inpaint"
+                              ? "Describe el objeto o textura a sintetizar en el área marcada..."
+                              : "Especifique el núcleo creativo..."
+                          }
+                        />
+                      </Tooltip>
+                    </div>
                   </div>
 
-                  <div
-                    className={`absolute bottom-4 right-6 text-[8px] font-black uppercase tracking-widest ${prompt.length >= MAX_PROMPT_LENGTH ? "text-red-500" : "text-zinc-600"}`}
-                  >
-                    {prompt.length} / ∞
-                  </div>
-                </div>
+                  {/* Negative Prompt Box */}
+                  <div className="space-y-1.5 w-full">
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-[10px] font-bold text-red-400/80 uppercase tracking-wider">
+                        Negative Prompt (A Evitar)
+                      </span>
+                      <span
+                        className={`text-[9px] font-mono font-bold uppercase ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "text-red-400" : "text-zinc-500"}`}
+                      >
+                        {negativePrompt.length} / ∞
+                      </span>
+                    </div>
 
-                <div className="relative group">
-                  <div className="absolute top-2 left-6 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => applyFormatting("bold", "negative")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Bold"
-                    >
-                      <Bold size={12} />
-                    </button>
-                    <button
-                      onClick={() => applyFormatting("italic", "negative")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Italic"
-                    >
-                      <Italic size={12} />
-                    </button>
-                    <button
-                      onClick={() => applyFormatting("code", "negative")}
-                      className="p-1 px-2 hover:bg-white/10 rounded-lg text-zinc-500 hover:text-white transition-colors"
-                      title="Code Block"
-                    >
-                      <Code size={12} />
-                    </button>
-                  </div>
-                  <Tooltip text="Describe lo que NO quieres ver: objetos, estilos, colores o defectos">
-                    <textarea
-                      id="negative-prompt-area"
-                      ref={negativePromptRef}
-                      value={negativePrompt}
-                      onChange={(e) => {
-                        if (e.target.value.length <= MAX_PROMPT_LENGTH) {
-                          setNegativePrompt(e.target.value);
-                        }
-                      }}
-                      onInput={(e) => {
-                        const target = e.target as HTMLTextAreaElement;
-                        target.style.height = "auto";
-                        target.style.height = `${Math.max(80, target.scrollHeight)}px`;
-                      }}
-                      className={`w-full min-h-[80px] h-20 bg-red-500/5 rounded-3xl p-6 pt-10 text-sm font-light text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-zinc-600 ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-red-500/10 focus:border-red-500/30"}`}
-                      placeholder="Elementos a evitar (Negative Prompt)..."
-                    />
-                  </Tooltip>
-                  <div
-                    className={`absolute bottom-4 right-6 text-[8px] font-black uppercase tracking-widest ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "text-red-500" : "text-zinc-600"}`}
-                  >
-                    {negativePrompt.length} / ∞
+                    <div className="relative group w-full">
+                      <div className="absolute top-2.5 left-3 flex items-center gap-1 z-10 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
+                        <button
+                          onClick={() => applyFormatting("bold", "negative")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Bold"
+                        >
+                          <Bold size={11} />
+                        </button>
+                        <button
+                          onClick={() => applyFormatting("italic", "negative")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Italic"
+                        >
+                          <Italic size={11} />
+                        </button>
+                        <button
+                          onClick={() => applyFormatting("code", "negative")}
+                          className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white transition-colors"
+                          title="Code Block"
+                        >
+                          <Code size={11} />
+                        </button>
+                      </div>
+
+                      <Tooltip text="Describe lo que NO quieres ver: objetos, estilos, colores o defectos">
+                        <textarea
+                          id="negative-prompt-area"
+                          ref={negativePromptRef}
+                          value={negativePrompt}
+                          onChange={(e) => {
+                            if (e.target.value.length <= MAX_PROMPT_LENGTH) {
+                              setNegativePrompt(e.target.value);
+                            }
+                          }}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement;
+                            target.style.height = "auto";
+                            target.style.height = `${Math.max(70, target.scrollHeight)}px`;
+                          }}
+                          className={`w-full min-h-[70px] bg-red-950/10 rounded-2xl p-4 pt-8 pr-16 text-sm font-normal text-[var(--text-primary)] border outline-none resize-none transition-all shadow-inner placeholder:text-zinc-500 leading-relaxed ${negativePrompt.length >= MAX_PROMPT_LENGTH ? "border-red-500/50" : "border-red-500/20 focus:border-red-500/40 focus:bg-red-950/20"}`}
+                          placeholder="Elementos a evitar (Negative Prompt)..."
+                        />
+                      </Tooltip>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -9942,7 +9936,7 @@ export default function App(): React.ReactElement {
             </div>
           </section>
 
-          <section className="order-first lg:order-last lg:col-span-7 space-y-6 w-full">
+          <section className="order-first lg:order-last lg:col-span-7 flex flex-col gap-6 w-full">
             <div className="relative glass aspect-square rounded-[3.5rem] overflow-hidden border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.5)] flex items-center justify-center bg-zinc-950 group hover:scale-[1.01] transition-transform duration-500">
               {evaluationData ? (
                 <div className="absolute top-8 right-8 z-[60]">
@@ -10035,24 +10029,42 @@ export default function App(): React.ReactElement {
                   </motion.div>
                 </div>
               ) : (
-                resultImage && (
-                  <div className="absolute top-8 right-8 z-[60]">
-                    <Tooltip text="Someter el asset actual a una evaluación neural C-ROI completa">
+                (resultImage || sourceImage) && (
+                  <div className="absolute top-8 right-8 z-[60] flex items-center gap-3">
+                    <Tooltip text="Visualización D3.js en tiempo real del espectro de frecuencias espaciales y nitidez de la imagen">
                       <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        disabled={isEvaluating}
-                        onClick={handleManualEvaluation}
-                        className="px-4 py-2 bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl text-[9px] font-black text-zinc-300 uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-all shadow-2xl"
+                        onClick={() => setShowFrequencySpectrum(true)}
+                        className={`px-4 py-2 bg-black/70 backdrop-blur-2xl border transition-all rounded-2xl text-[9px] font-black uppercase tracking-widest flex items-center gap-2.5 shadow-2xl ${
+                          showFrequencySpectrum
+                            ? "bg-amber-400 text-black border-amber-400"
+                            : "text-amber-400 border-amber-400/30 hover:bg-amber-400/10"
+                        }`}
                       >
-                        {isEvaluating ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <ShieldCheck size={14} className="text-emerald-400" />
-                        )}
-                        {isEvaluating ? "Evaluando..." : "C-ROI EVALUATION"}
+                        <Activity size={14} className="animate-pulse" />
+                        ESPECTRO FRECUENCIA (D3)
                       </motion.button>
                     </Tooltip>
+
+                    {resultImage && (
+                      <Tooltip text="Someter el asset actual a una evaluación neural C-ROI completa">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          disabled={isEvaluating}
+                          onClick={handleManualEvaluation}
+                          className="px-4 py-2 bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl text-[9px] font-black text-zinc-300 uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-all shadow-2xl"
+                        >
+                          {isEvaluating ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <ShieldCheck size={14} className="text-emerald-400" />
+                          )}
+                          {isEvaluating ? "Evaluando..." : "C-ROI EVALUATION"}
+                        </motion.button>
+                      </Tooltip>
+                    )}
                   </div>
                 )
               )}
@@ -10655,6 +10667,20 @@ export default function App(): React.ReactElement {
                             className="p-5 bg-black/80 backdrop-blur-xl text-pink-400 rounded-2xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl"
                           >
                             <Sparkles size={22} />
+                          </motion.button>
+                        </Tooltip>
+                        <Tooltip text="Análisis de Espectro de Frecuencias Espaciales (D3.js)">
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => setShowFrequencySpectrum(!showFrequencySpectrum)}
+                            className={`p-5 backdrop-blur-xl rounded-2xl border transition-all shadow-2xl ${
+                              showFrequencySpectrum
+                                ? "bg-amber-400 text-black border-amber-400"
+                                : "bg-black/80 text-amber-400 border-white/10 hover:bg-white/10"
+                            }`}
+                          >
+                            <Activity size={22} className="animate-pulse" />
                           </motion.button>
                         </Tooltip>
                         <Tooltip text="Generar 4 Variaciones Neurales (Multi-Synthesis Edit)">
@@ -11805,6 +11831,19 @@ Trabajé en el desarrollo integral del sistema Syntergic, desde la implementaci�
         </filter>
       </svg>
       <SAFResultOverlay />
+      {showFrequencySpectrum && (
+        <SpatialFrequencySpectrum
+          imageUrl={gradedImage || resultImage || sourceImage || null}
+          onClose={() => setShowFrequencySpectrum(false)}
+        />
+      )}
+      {showTemplateManager && (
+        <PromptTemplateManagerModal
+          currentPrompt={prompt}
+          onClose={() => setShowTemplateManager(false)}
+          onInjectPrompt={handleInjectPrompt}
+        />
+      )}
     </div>
   );
 }

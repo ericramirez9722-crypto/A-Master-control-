@@ -12,9 +12,11 @@
   "dependencies": {
     "@google/genai": "^1.40.0",
     "@tailwindcss/vite": "^4.2.2",
+    "@types/d3": "^7.4.3",
     "@types/express": "^5.0.6",
     "@types/lodash": "^4.17.24",
     "@types/ws": "^8.18.1",
+    "d3": "^7.9.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jszip": "^3.10.1",
