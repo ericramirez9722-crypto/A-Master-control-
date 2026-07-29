@@ -101,6 +101,8 @@ import {
   Save,
   ChevronsLeftRight,
   LayoutTemplate,
+  CheckSquare,
+  Archive,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster, toast } from "sonner";
@@ -212,6 +214,8 @@ export default function App(): React.ReactElement {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLayout, setHistoryLayout] = useState<"list" | "grid">("list");
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
+  const [isExportingZip, setIsExportingZip] = useState<boolean>(false);
   const [selectedPresetCategory, setSelectedPresetCategory] =
     useState<string>("all");
   const [collapsedPresetCategories, setCollapsedPresetCategories] = useState<
@@ -337,6 +341,138 @@ export default function App(): React.ReactElement {
       provenance: item.provenance || generateProvenance(item),
     };
     setHistory((prev) => [newItem, ...prev]);
+  };
+
+  const toggleHistorySelection = (id: string) => {
+    setSelectedHistoryIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
+    );
+  };
+
+  const selectAllFilteredHistory = () => {
+    const filteredIds = filteredHistory.map((item) => item.id);
+    const allSelected =
+      filteredIds.length > 0 &&
+      filteredIds.every((id) => selectedHistoryIds.includes(id));
+    if (allSelected) {
+      setSelectedHistoryIds((prev) =>
+        prev.filter((id) => !filteredIds.includes(id)),
+      );
+    } else {
+      setSelectedHistoryIds((prev) =>
+        Array.from(new Set([...prev, ...filteredIds])),
+      );
+    }
+  };
+
+  const exportSelectedHistoryZip = async () => {
+    const itemsToExport = history.filter((item) =>
+      selectedHistoryIds.length > 0
+        ? selectedHistoryIds.includes(item.id)
+        : filteredHistory.some((f) => f.id === item.id),
+    );
+
+    if (itemsToExport.length === 0) {
+      toast.error("Sin elementos para exportar", {
+        description:
+          "Por favor selecciona al menos un elemento del historial.",
+      });
+      return;
+    }
+
+    setIsExportingZip(true);
+    const toastId = toast.loading(
+      `Empaquetando ZIP (${itemsToExport.length} elementos)...`,
+    );
+
+    try {
+      const zip = new JSZip();
+      const imgFolder = zip.folder("images");
+      const metaFolder = zip.folder("metadata");
+
+      for (let index = 0; index < itemsToExport.length; index++) {
+        const item = itemsToExport[index];
+        const safePrompt = (item.prompt || "item")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "_")
+          .replace(/_+/g, "_")
+          .slice(0, 30);
+        const baseFilename = `${item.id}_${safePrompt}`;
+
+        let ext = "png";
+        let imageBuffer: ArrayBuffer | Blob | string | null = null;
+        let isBase64 = false;
+
+        if (item.image.startsWith("data:")) {
+          const mimeMatch = item.image.match(
+            /^data:(image\/[a-zA-Z+]+);base64,/,
+          );
+          if (mimeMatch) {
+            const mime = mimeMatch[1];
+            ext = mime.split("/")[1] || "png";
+            if (ext === "jpeg") ext = "jpg";
+            imageBuffer = item.image.split(",")[1];
+            isBase64 = true;
+          }
+        } else {
+          try {
+            const response = await fetch(item.image);
+            imageBuffer = await response.blob();
+          } catch (e) {
+            console.error("Error fetching image for history zip export:", e);
+          }
+        }
+
+        if (imageBuffer) {
+          const imgName = `${baseFilename}.${ext}`;
+          if (isBase64 && typeof imageBuffer === "string") {
+            (imgFolder || zip).file(imgName, imageBuffer, { base64: true });
+          } else {
+            (imgFolder || zip).file(imgName, imageBuffer as Blob);
+          }
+        }
+
+        const sidecarData = {
+          id: item.id,
+          timestamp: item.timestamp,
+          mode: item.mode,
+          prompt: item.prompt,
+          params: item.params,
+          provenance: item.provenance || null,
+          exportedAt: new Date().toISOString(),
+        };
+
+        const jsonName = `${baseFilename}.json`;
+        (metaFolder || zip).file(
+          jsonName,
+          JSON.stringify(sidecarData, null, 2),
+        );
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ia-studio-history-${itemsToExport.length}-items-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("Exportación ZIP completada", {
+        id: toastId,
+        description: `Se han exportado ${itemsToExport.length} elementos con sus imágenes y metadatos JSON sidecar.`,
+      });
+    } catch (err: any) {
+      console.error("Error creating ZIP archive:", err);
+      toast.error("Error al exportar ZIP", {
+        id: toastId,
+        description:
+          err?.message || "Ocurrió un error al generar el archivo ZIP.",
+      });
+    } finally {
+      setIsExportingZip(false);
+    }
   };
 
   const exportHistory = () => {
@@ -2711,7 +2847,7 @@ export default function App(): React.ReactElement {
         />
         <div className="relative bg-[var(--bg-secondary)] border border-[var(--border-primary)] w-full max-w-5xl max-h-[80vh] rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-300">
           <div className="p-8 border-b border-[var(--border-primary)] flex flex-col gap-6 bg-[var(--bg-secondary)]/50 backdrop-blur">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-white/5 rounded-2xl">
                   <History className="text-amber-400" size={24} />
@@ -2725,8 +2861,30 @@ export default function App(): React.ReactElement {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-xl mr-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {filteredHistory.length > 0 && (
+                  <button
+                    onClick={selectAllFilteredHistory}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    <CheckSquare size={13} className="text-amber-400" />
+                    {filteredHistory.length > 0 &&
+                    filteredHistory.every((item) =>
+                      selectedHistoryIds.includes(item.id),
+                    )
+                      ? "Desmarcar Todos"
+                      : "Seleccionar Todos"}
+                  </button>
+                )}
+
+                {selectedHistoryIds.length > 0 && (
+                  <span className="px-2.5 py-1 bg-amber-400/10 border border-amber-400/30 text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-xl">
+                    {selectedHistoryIds.length} seleccionado
+                    {selectedHistoryIds.length > 1 ? "s" : ""}
+                  </span>
+                )}
+
+                <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-xl">
                   <Tooltip text="Vista de Lista">
                     <button
                       onClick={() => setHistoryLayout("list")}
@@ -2744,13 +2902,32 @@ export default function App(): React.ReactElement {
                     </button>
                   </Tooltip>
                 </div>
+
+                <button
+                  onClick={exportSelectedHistoryZip}
+                  disabled={isExportingZip || history.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-400 text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-300 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Exportar archivo ZIP con las imágenes seleccionadas y sus metadatos JSON sidecars"
+                >
+                  {isExportingZip ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Archive size={14} />
+                  )}
+                  Exportar ZIP{" "}
+                  {selectedHistoryIds.length > 0
+                    ? `(${selectedHistoryIds.length})`
+                    : ""}
+                </button>
+
                 <button
                   onClick={exportHistory}
                   disabled={history.length === 0}
-                  className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 text-zinc-300 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Download size={14} /> Exportar JSON
+                  <Download size={14} /> JSON
                 </button>
+
                 <button
                   onClick={() => setShowHistory(false)}
                   className="p-2 text-zinc-500 hover:text-white transition-colors"
@@ -2831,11 +3008,35 @@ export default function App(): React.ReactElement {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredHistory.map((item) => {
                   const isActive = item.image === resultImage;
+                  const isSelected = selectedHistoryIds.includes(item.id);
                   return (
                     <div
                       key={item.id}
-                      className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col group hover:border-white/20 transition-all relative ${isActive ? "border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20" : "border-white/5"}`}
+                      className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col group hover:border-white/20 transition-all relative ${isSelected ? "border-amber-400 bg-amber-400/5 ring-2 ring-amber-400/30 shadow-[0_0_30px_rgba(245,158,11,0.2)]" : isActive ? "border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20" : "border-white/5"}`}
                     >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleHistorySelection(item.id);
+                        }}
+                        className={`absolute top-3 left-3 z-30 p-2 rounded-xl border transition-all backdrop-blur-md flex items-center justify-center ${
+                          isSelected
+                            ? "bg-amber-400 text-black border-amber-300 shadow-md scale-105"
+                            : "bg-black/60 text-white/70 border-white/20 hover:border-white hover:text-white hover:scale-105"
+                        }`}
+                        title={
+                          isSelected
+                            ? "Desmarcar de exportación ZIP"
+                            : "Seleccionar para exportación ZIP"
+                        }
+                      >
+                        {isSelected ? (
+                          <CheckSquare size={14} />
+                        ) : (
+                          <Square size={14} />
+                        )}
+                      </button>
+
                       {isActive && (
                         <div className="absolute top-0 right-0 z-10">
                           <div className="bg-amber-500 text-black text-[7px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest shadow-lg">
@@ -2849,7 +3050,7 @@ export default function App(): React.ReactElement {
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           loading="lazy"
                         />
-                        <div className="absolute top-3 left-3 flex gap-1">
+                        <div className="absolute top-3 left-12 flex gap-1">
                           <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
                             <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">
                               {item.mode.includes("upscale")
@@ -2938,11 +3139,35 @@ export default function App(): React.ReactElement {
               <div className="flex flex-col gap-4">
                 {filteredHistory.map((item) => {
                   const isActive = item.image === resultImage;
+                  const isSelected = selectedHistoryIds.includes(item.id);
                   return (
                     <div
                       key={item.id}
-                      className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col sm:flex-row group hover:border-white/20 transition-all h-auto sm:h-40 relative ${isActive ? "border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20" : "border-white/5"}`}
+                      className={`bg-white/5 border rounded-3xl overflow-hidden flex flex-col sm:flex-row group hover:border-white/20 transition-all h-auto sm:h-40 relative ${isSelected ? "border-amber-400 bg-amber-400/5 ring-2 ring-amber-400/30 shadow-[0_0_30px_rgba(245,158,11,0.2)]" : isActive ? "border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20" : "border-white/5"}`}
                     >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleHistorySelection(item.id);
+                        }}
+                        className={`absolute top-3 left-3 z-30 p-2 rounded-xl border transition-all backdrop-blur-md flex items-center justify-center ${
+                          isSelected
+                            ? "bg-amber-400 text-black border-amber-300 shadow-md scale-105"
+                            : "bg-black/60 text-white/70 border-white/20 hover:border-white hover:text-white hover:scale-105"
+                        }`}
+                        title={
+                          isSelected
+                            ? "Desmarcar de exportación ZIP"
+                            : "Seleccionar para exportación ZIP"
+                        }
+                      >
+                        {isSelected ? (
+                          <CheckSquare size={14} />
+                        ) : (
+                          <Square size={14} />
+                        )}
+                      </button>
+
                       {isActive && (
                         <div className="absolute top-0 right-0 z-10">
                           <div className="bg-amber-500 text-black text-[7px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest shadow-lg">
@@ -2956,7 +3181,7 @@ export default function App(): React.ReactElement {
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           loading="lazy"
                         />
-                        <div className="absolute top-3 left-3 flex gap-1">
+                        <div className="absolute top-3 left-12 flex gap-1">
                           <div className="px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-lg border border-white/10">
                             <span className="text-[7px] font-black uppercase tracking-widest text-amber-400">
                               {item.mode.includes("upscale")
